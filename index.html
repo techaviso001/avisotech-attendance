@@ -70,13 +70,13 @@
             }
         };
 
-        // 🟢 加入強健的時區與格式解析器 (防止 1899-12-30T 再次出現)
+        // 加入強健的時區與格式解析器
         const formatTimeDisplay = (val) => {
             if (!val) return '';
             if (typeof val === 'string' && val.includes('1899-12-30T')) {
                 const utcDate = new Date(val);
                 if (!isNaN(utcDate.getTime())) {
-                    utcDate.setUTCHours(utcDate.getUTCHours() + 8); // 加回台灣 8 小時
+                    utcDate.setUTCHours(utcDate.getUTCHours() + 8);
                     return `${String(utcDate.getUTCHours()).padStart(2, '0')}:${String(utcDate.getUTCMinutes()).padStart(2, '0')}`;
                 }
             }
@@ -199,7 +199,6 @@
                                         <div key={idx} className="mb-2 text-sm bg-emerald-50 p-3 rounded-lg border border-emerald-100 shadow-sm">
                                             <div className="font-bold text-emerald-800 mb-1">{employees.find(e=>e.id===att.employeeId)?.name}</div>
                                             <div className="text-emerald-700 flex justify-between font-mono">
-                                                {/* 🟢 套用時間防護網，確保正確顯示 */}
                                                 <span>上班: {formatTimeDisplay(att.checkInTime) || '--:--'}</span>
                                                 <span>下班: {formatTimeDisplay(att.checkOutTime) || '--:--'}</span>
                                             </div>
@@ -408,7 +407,7 @@
                 }
             }, [lineProfile, employees, isDataLoading]);
 
-            // 🟢 資料取得時順便用防護網處理歷史髒資料
+            // 資料取得時順便用防護網處理歷史髒資料
             const fetchLatestData = async () => {
                 setIsDataLoading(true);
                 try {
@@ -425,7 +424,6 @@
                         setLeaveRequests(parsedReqs.filter(r => r.type === 'leave'));
                         setMakeupRequests(parsedReqs.filter(r => r.type === 'makeup'));
                         
-                        // 🟢 將打卡時間預先透過 formatTimeDisplay 格式化，確保日曆不會再跑出 1899
                         const parsedAttendance = (data.attendance || []).map(a => ({
                             ...a,
                             checkInTime: formatTimeDisplay(a.checkInTime),
@@ -736,7 +734,6 @@
                                 {dayAtt.map((att, idx) => (
                                     <div key={`att-${idx}`} className="text-[10px] leading-tight text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 truncate shadow-sm">
                                         {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
-                                        {/* 🟢 這裡的資料已經透過 formatTimeDisplay 防護網處理過了 */}
                                         {att.checkInTime ? `入${att.checkInTime}` : ''} {att.checkOutTime ? `出${att.checkOutTime}` : ''}
                                     </div>
                                 ))}
