@@ -287,6 +287,39 @@
             const [currentMonth, setCurrentMonth] = useState(new Date());
             const [calendarUserFilter, setCalendarUserFilter] = useState('all');
 
+            // 🟢 修正：補回遺失的 LIFF 初始化與資料載入邏輯
+            useEffect(() => {
+                let isMounted = true;
+                
+                // 這裡會呼叫下方的 fetchLatestData
+                fetchLatestData(); 
+                
+                // 防呆機制：如果 8 秒後 LINE 還沒回應，強制解除載入畫面
+                const fallbackTimeout = setTimeout(() => {
+                    if (isMounted) setIsAuthChecking(false);
+                }, 8000);
+                
+                const initLiff = async () => {
+                    try {
+                        await liff.init({ liffId: MY_LIFF_ID });
+                        if (isMounted) {
+                            if (liff.isLoggedIn()) {
+                                const profile = await liff.getProfile();
+                                setLineProfile(profile);
+                            } else {
+                                setIsAuthChecking(false);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("LIFF 初始化失敗:", err);
+                        if (isMounted) setIsAuthChecking(false);
+                    }
+                };
+                initLiff();
+                
+                return () => { isMounted = false; clearTimeout(fallbackTimeout); };
+            }, []);
+
             useEffect(() => {
                 if (lineProfile && employees.length > 0) {
                     const target = employees.find(e => e.lineId === lineProfile.userId);
