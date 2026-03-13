@@ -43,17 +43,16 @@
         import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
         import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning } from 'https://esm.sh/lucide-react@0.263.1';
 
-        // 🟢 已更新為最新的 GAS Web App 網址
+        // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_4';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_4';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_5';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_5';
         
-        // 🔴 請確保此處為您正確的 LIFF ID
+        // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
         
         const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
 
-        // 使用 fetch 呼叫 GAS，包含 redirect: 'follow' 處理跨域導向
         const callApi = async (action, payload = {}) => {
             try {
                 const response = await fetch(API_URL, {
@@ -164,7 +163,7 @@
             )
         };
 
-        // 🟢 新增：編輯單據用的 Modal
+        // 🟢 B需求：編輯單據的 Modal
         const EditRequestModal = ({ isOpen, onClose, onSubmit, reqData, setReqData, employees, currentUser }) => {
             if (!isOpen || !reqData) return null;
             const isLeave = reqData.type === 'leave';
@@ -273,7 +272,6 @@
             
             const [isMakeupModalOpen, setIsMakeupModalOpen] = useState(false);
             const [isEditEmpModalOpen, setIsEditEmpModalOpen] = useState(false);
-            const [editingRequest, setEditingRequest] = useState(null); // 🟢 編輯單據的 state
             
             const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '' });
             const [activeTab, setActiveTab] = useState('apply');
@@ -282,19 +280,17 @@
             const [makeupForm, setMakeupForm] = useState({ targetDate: getTodayString(), targetTime: '09:00', makeupType: '上班', reason: '' });
             const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
 
-            // 日曆與檢視模式的 State
+            // 🟢 A與B需求：新增視圖模式與編輯狀態
             const [viewMode, setViewMode] = useState('list'); 
             const [currentMonth, setCurrentMonth] = useState(new Date());
             const [calendarUserFilter, setCalendarUserFilter] = useState('all');
+            const [editingRequest, setEditingRequest] = useState(null);
 
-            // 🟢 修正：補回遺失的 LIFF 初始化與資料載入邏輯
+            // 🟢 核心修正：保留完整的 LIFF 初始化，確保系統不卡死
             useEffect(() => {
                 let isMounted = true;
-                
-                // 這裡會呼叫下方的 fetchLatestData
                 fetchLatestData(); 
                 
-                // 防呆機制：如果 8 秒後 LINE 還沒回應，強制解除載入畫面
                 const fallbackTimeout = setTimeout(() => {
                     if (isMounted) setIsAuthChecking(false);
                 }, 8000);
@@ -431,7 +427,7 @@
                 }
                 const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }), ...deputyInfo };
                 setLeaveRequests([newRequest, ...leaveRequests]); setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
-                showAlert('成功', '假單已送出', 'success'); await callApi("addRequest", newRequest);
+                showAlert('成功', '假單已送出，並通知代理人', 'success'); await callApi("addRequest", newRequest);
             };
 
             const handleSubmitMakeup = async (e) => {
@@ -441,7 +437,15 @@
                 showAlert('成功', '補打卡申請已送出', 'success'); await callApi("addRequest", newRequest);
             };
 
-            // 🟢 新增：送出編輯過的單據
+            // 🟢 A需求：代理人按下同意或拒絕
+            const handleDeputyAction = async (requestId, isAgreed) => {
+                const status = isAgreed ? 'agreed' : 'rejected';
+                setLeaveRequests(prev => prev.map(req => req.requestId === requestId ? { ...req, deputyStatus: status } : req));
+                showAlert('已回覆', `您已${isAgreed ? '同意' : '拒絕'}代理`, isAgreed ? 'success' : 'alert');
+                await callApi("updateRequestStatus", { requestId, deputyStatus: status });
+            };
+
+            // 🟢 B需求：送出編輯後的單據
             const handleSubmitEditRequest = async (e) => {
                 e.preventDefault();
                 if (!currentUser || !editingRequest) return;
@@ -450,14 +454,12 @@
                 }
 
                 let updatedReq = { ...editingRequest };
-                
-                // 如果是請假單且修改了代理人，需要重置代理人狀態
                 if (updatedReq.type === 'leave') {
                     if (updatedReq.deputyId) {
                         const deputy = employees.find(emp => emp.id === updatedReq.deputyId);
                         if (deputy) {
                             updatedReq.deputyName = deputy.name;
-                            updatedReq.deputyStatus = 'pending'; // 只要有代理人，儲存後強制重新發送審核
+                            updatedReq.deputyStatus = 'pending';
                         }
                     } else {
                         updatedReq.deputyName = '';
@@ -465,7 +467,6 @@
                     }
                 }
 
-                // 更新前端畫面
                 if (updatedReq.type === 'leave') {
                     setLeaveRequests(prev => prev.map(r => r.requestId === updatedReq.requestId ? updatedReq : r));
                 } else {
@@ -473,9 +474,7 @@
                 }
 
                 setEditingRequest(null);
-                showAlert('成功', '單據已更新並重新送出', 'success');
-                
-                // 呼叫 API 更新後端
+                showAlert('成功', '單據已更新並儲存', 'success');
                 await callApi("editRequest", updatedReq);
             };
 
@@ -517,14 +516,6 @@
                 });
             };
 
-            // 處理代理人同意/拒絕的操作
-            const handleDeputyAction = async (requestId, isAgreed) => {
-                const status = isAgreed ? 'agreed' : 'rejected';
-                setLeaveRequests(prev => prev.map(req => req.requestId === requestId ? { ...req, deputyStatus: status } : req));
-                showAlert('已回覆', `您已${isAgreed ? '同意' : '拒絕'}代理`, isAgreed ? 'success' : 'alert');
-                await callApi("updateRequestStatus", { requestId, deputyStatus: status });
-            };
-
             const handleSaveEmployee = async (e) => {
                 e.preventDefault();
                 const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0 };
@@ -536,53 +527,7 @@
                 await callApi("saveEmployee", newEmployee);
             };
 
-            if (isAuthChecking) return (<div className="initial-loader-container"><div className="loader"></div><p style={{marginTop:'15px',color:'#6b7280',fontWeight:'bold'}}>檢查身分中...</p></div>);
-            
-            if (!currentUser || currentUser.error) {
-                return (
-                    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-                        <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
-                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-[#06C755]">
-                            <div className="flex justify-center mb-6"><CompanyLogo size="large" /></div>
-                            
-                            {currentUser?.error === "not_found" ? (
-                                <div className="space-y-4 text-left">
-                                    <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200">
-                                        <h2 className="font-bold text-lg mb-1 flex items-center"><AlertCircle className="w-5 h-5 mr-1" /> 尚未綁定系統</h2>
-                                        <p className="text-sm">您已成功登入 LINE，但尚未被加入員工名單中。</p>
-                                    </div>
-                                    <div className="bg-gray-50 p-4 rounded-xl">
-                                        <p className="text-sm text-gray-800 mb-2 font-bold">⚠️ 注意：這不是您平常加好友的 LINE ID</p>
-                                        <p className="text-xs text-gray-600 mb-3 leading-relaxed">這是系統為您產生的專屬「開發者 User ID」，特徵是永遠為 <strong className="text-[#06C755]">U 開頭的 33 碼字串</strong>。</p>
-                                        <p className="text-xs text-gray-500 mb-2">請點擊下方代碼複製，並交給管理員更新您的資料：</p>
-                                        <div className="flex bg-white border border-gray-200 shadow-inner rounded-lg p-3 items-center justify-center">
-                                            <code className="text-xs break-all text-[#06C755] font-bold select-all cursor-text">{currentUser.lineId}</code>
-                                        </div>
-                                    </div>
-                                    <button onClick={handleLogout} className="w-full text-gray-500 text-sm mt-4 underline">切換其他 LINE 帳號 / 重新載入</button>
-                                </div>
-                            ) : (
-                                <div>
-                                    <h1 className="text-xl font-bold mb-4 text-gray-800">系統登入</h1>
-                                    <p className="text-sm text-gray-600 mb-5">請點擊下方按鈕授權登入出勤系統</p>
-                                    
-                                    <button onClick={handleLineLogin} className="w-full bg-[#06C755] text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-green-600 flex items-center justify-center transition-colors">
-                                        <svg className="w-6 h-6 mr-2" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M24 10.304c0-4.364-4.505-7.896-10.038-7.896C8.428 2.408 3.93 5.94 3.93 10.304c0 3.863 3.513 7.151 8.356 7.799.324.07.766.216.88.514.1.265.064.676.03.88l-.133.801c-.04.226-.188.948.835.514 1.024-.434 5.532-3.268 7.51-5.56.126-.145.228-.276.321-.403a6.76 6.76 0 0 0 2.271-4.545zM8.36 12.02H6.551a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.808c.19 0 .346.155.346.347 0 .19-.155.346-.346.346H6.898v1h1.462c.19 0 .346.156.346.347 0 .19-.155.346-.346.346H6.898v1.282h1.462c.19 0 .346.156.346.346 0 .192-.155.347-.346.347zm4.27-.346c0 .192-.155.347-.346.347H10.58a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.704c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.358v2.627h1.358c.19 0 .346.156.346.346zm2.348.346a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347c.19 0 .346.155.346.347v3.32c0 .192-.155.347-.346.347zm5.52-.346c0 .192-.155.347-.346.347h-2.181a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h2.181c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.835v.982h1.835c.19 0 .346.156.346.347 0 .19-.155.346-.346.346h-1.835v1.298h1.835c.19 0 .346.156.346.346z"/></svg>
-                                        LINE 快速登入
-                                    </button>
-
-                                    <div className="mt-6 text-xs text-gray-500 bg-green-50 p-4 rounded-xl border border-green-100 text-left">
-                                        <p className="font-bold mb-1 text-green-800">💡 系統說明：</p>
-                                        <p className="leading-relaxed">點擊上方按鈕後，<strong className="text-green-700">系統將調用 LIFF 授權登入</strong>，完成後會自動導回系統並載入資料。</p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                );
-            }
-
-            // 日曆渲染邏輯
+            // 🟢 A需求：日曆渲染邏輯
             const renderCalendar = () => {
                 const year = currentMonth.getFullYear();
                 const month = currentMonth.getMonth();
@@ -657,11 +602,59 @@
                 );
             };
 
+            if (isAuthChecking) return (<div className="initial-loader-container"><div className="loader"></div><p style={{marginTop:'15px',color:'#6b7280',fontWeight:'bold'}}>檢查身分中...</p></div>);
+            
+            if (!currentUser || currentUser.error) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                        <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
+                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-[#06C755]">
+                            <div className="flex justify-center mb-6"><CompanyLogo size="large" /></div>
+                            
+                            {currentUser?.error === "not_found" ? (
+                                <div className="space-y-4 text-left">
+                                    <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200">
+                                        <h2 className="font-bold text-lg mb-1 flex items-center"><AlertCircle className="w-5 h-5 mr-1" /> 尚未綁定系統</h2>
+                                        <p className="text-sm">您已成功登入 LINE，但尚未被加入員工名單中。</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded-xl">
+                                        <p className="text-sm text-gray-800 mb-2 font-bold">⚠️ 注意：這不是您平常加好友的 LINE ID</p>
+                                        <p className="text-xs text-gray-600 mb-3 leading-relaxed">這是系統為您產生的專屬「開發者 User ID」，特徵是永遠為 <strong className="text-[#06C755]">U 開頭的 33 碼字串</strong>。</p>
+                                        <p className="text-xs text-gray-500 mb-2">請點擊下方代碼複製，並交給管理員更新您的資料：</p>
+                                        <div className="flex bg-white border border-gray-200 shadow-inner rounded-lg p-3 items-center justify-center">
+                                            <code className="text-xs break-all text-[#06C755] font-bold select-all cursor-text">{currentUser.lineId}</code>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleLogout} className="w-full text-gray-500 text-sm mt-4 underline">切換其他 LINE 帳號 / 重新載入</button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <h1 className="text-xl font-bold mb-4 text-gray-800">系統登入</h1>
+                                    <p className="text-sm text-gray-600 mb-5">請點擊下方按鈕授權登入出勤系統</p>
+                                    
+                                    <button onClick={handleLineLogin} className="w-full bg-[#06C755] text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-green-600 flex items-center justify-center transition-colors">
+                                        <svg className="w-6 h-6 mr-2" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M24 10.304c0-4.364-4.505-7.896-10.038-7.896C8.428 2.408 3.93 5.94 3.93 10.304c0 3.863 3.513 7.151 8.356 7.799.324.07.766.216.88.514.1.265.064.676.03.88l-.133.801c-.04.226-.188.948.835.514 1.024-.434 5.532-3.268 7.51-5.56.126-.145.228-.276.321-.403a6.76 6.76 0 0 0 2.271-4.545zM8.36 12.02H6.551a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.808c.19 0 .346.155.346.347 0 .19-.155.346-.346.346H6.898v1h1.462c.19 0 .346.156.346.347 0 .19-.155.346-.346.346H6.898v1.282h1.462c.19 0 .346.156.346.346 0 .192-.155.347-.346.347zm4.27-.346c0 .192-.155.347-.346.347H10.58a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.704c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.358v2.627h1.358c.19 0 .346.156.346.346zm2.348.346a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347c.19 0 .346.155.346.347v3.32c0 .192-.155.347-.346.347zm5.52-.346c0 .192-.155.347-.346.347h-2.181a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h2.181c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.835v.982h1.835c.19 0 .346.156.346.347 0 .19-.155.346-.346.346h-1.835v1.298h1.835c.19 0 .346.156.346.346z"/></svg>
+                                        LINE 快速登入
+                                    </button>
+
+                                    <div className="mt-6 text-xs text-gray-500 bg-green-50 p-4 rounded-xl border border-green-100 text-left">
+                                        <p className="font-bold mb-1 text-green-800">💡 系統說明：</p>
+                                        <p className="leading-relaxed">點擊上方按鈕後，<strong className="text-green-700">系統將調用 LIFF 授權登入</strong>，完成後會自動導回系統並載入資料。</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="min-h-screen bg-gray-50 pb-20 relative">
                     <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
                     <MakeupRequestModal isOpen={isMakeupModalOpen} onClose={()=>setIsMakeupModalOpen(false)} onSubmit={handleSubmitMakeup} form={makeupForm} setForm={setMakeupForm}/>
                     <EditEmployeeModal isOpen={isEditEmpModalOpen} onClose={()=>setIsEditEmpModalOpen(false)} onSubmit={handleSaveEmployee} employee={empForm} setEmployee={setEmpForm}/>
+                    
+                    {/* 🟢 新增：編輯單據用的組件 */}
                     <EditRequestModal isOpen={!!editingRequest} onClose={()=>setEditingRequest(null)} onSubmit={handleSubmitEditRequest} reqData={editingRequest} setReqData={setEditingRequest} employees={employees} currentUser={currentUser} />
 
                     <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-30">
@@ -739,6 +732,7 @@
                                     <h3 className="font-bold text-lg text-gray-700">
                                         {activeTab === 'admin' ? '員工列表' : (viewMode === 'calendar' ? '出勤與請假日曆' : '近期紀錄')}
                                     </h3>
+                                    {/* 🟢 新增：列表與日曆切換按鈕 */}
                                     {activeTab !== 'admin' && (
                                         <div className="flex bg-gray-100 p-1 rounded-lg">
                                             <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center ${viewMode === 'list' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}><List className="w-3.5 h-3.5 mr-1"/>列表</button>
@@ -763,7 +757,7 @@
                                         {visibleRequests.length === 0 ? <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed">無近期紀錄</div> : visibleRequests.map(req => {
                                             const deputyEmp = req.deputyId ? employees.find(e => e.id === req.deputyId) : null;
                                             const deputyName = deputyEmp ? deputyEmp.name : req.deputyName;
-                                            
+
                                             return (
                                             <div key={req.requestId} className="bg-white p-4 rounded-xl border shadow-sm relative">
                                                 <div className="flex justify-between items-start mb-2">
@@ -778,6 +772,7 @@
                                                     <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">時間</span><span className="text-gray-700 text-xs">{req.type==='leave' ? `${req.startDate} ~ ${req.endDate}` : `${req.targetDate} ${req.targetTime}`}</span></div>
                                                     <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">事由</span><span className="text-gray-600 break-all">{req.reason}</span></div>
                                                     
+                                                    {/* 🟢 新增：代理人狀態顯示 */}
                                                     {req.deputyId && (
                                                         <div className="flex items-start mt-1">
                                                             <span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">代理人</span>
@@ -791,18 +786,22 @@
                                                     )}
                                                 </div>
                                                 <div className="flex justify-end mt-3 gap-2">
+                                                    {/* 🟢 新增：代理人審核按鈕 */}
                                                     {req.deputyId === currentUser.id && req.deputyStatus === 'pending' && req.status === '待簽核' && (
                                                         <div className="flex gap-2 mr-auto">
                                                             <button onClick={() => handleDeputyAction(req.requestId, false)} className="text-xs bg-gray-50 text-gray-600 px-3 py-1.5 rounded-lg font-bold hover:bg-gray-100 border border-gray-200 transition-colors shadow-sm">拒絕代理</button>
                                                             <button onClick={() => handleDeputyAction(req.requestId, true)} className="text-xs bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm">同意代理</button>
                                                         </div>
                                                     )}
+
+                                                    {/* 🟢 新增：修改單據按鈕 */}
                                                     {currentUser.id === req.applicantId && req.status === '待簽核' && (
-                                                        <div className="flex gap-2">
-                                                            <button onClick={()=>setEditingRequest({...req})} className="text-xs text-blue-500 underline hover:text-blue-700 font-bold">編輯</button>
-                                                            <button onClick={()=>handleCancelRequest(req)} className="text-xs text-gray-400 underline hover:text-red-500">取消</button>
+                                                        <div className="flex gap-3">
+                                                            <button onClick={()=>setEditingRequest({...req})} className="text-xs text-blue-500 font-bold hover:text-blue-700 underline">編輯修改</button>
+                                                            <button onClick={()=>handleCancelRequest(req)} className="text-xs text-gray-400 underline hover:text-red-500">取消申請</button>
                                                         </div>
                                                     )}
+
                                                     {currentUser.role === '簽核者' && req.status === '待簽核' && <><button onClick={()=>handleApproval(req,false)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100">不通過</button><button onClick={()=>handleApproval(req,true)} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded border border-green-100">通過</button></>}
                                                 </div>
                                             </div>
