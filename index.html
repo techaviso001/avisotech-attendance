@@ -9,6 +9,8 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- 引入 LINE LIFF SDK -->
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <!-- 引入 SheetJS 處理 Excel 匯出 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     
     <style>
         body { -webkit-tap-highlight-color: transparent; }
@@ -45,8 +47,8 @@
 
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_6';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_6';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_8';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_8';
         
         // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
@@ -285,6 +287,9 @@
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
                   </div>
                   <form onSubmit={onSubmit} className="p-6 space-y-4" autoComplete="off">
+                    <input type="text" name="fakeusernameremembered" style={{display:'none'}} aria-hidden="true" />
+                    <input type="password" name="fakepasswordremembered" style={{display:'none'}} aria-hidden="true" />
+                    
                     <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-500 mb-4 flex items-center"><Info className="w-4 h-4 mr-2" />員工 ID ({employee.id}) 無法修改</div>
                     <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required autoComplete="new-password" className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
                     <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required autoComplete="new-password" placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
@@ -336,11 +341,11 @@
             const [editingRequest, setEditingRequest] = useState(null);
             const [selectedDateDetails, setSelectedDateDetails] = useState(null); 
 
-            // 🟢 新增：橫幅顏色偏好狀態
+            // 橫幅顏色狀態
             const [bannerColor, setBannerColor] = useState('bg-[#06C755]');
             const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
-            // 🟢 新增：Excel 匯出日期區間
+            // Excel 匯出日期區間狀態
             const [exportDates, setExportDates] = useState({ start: getTodayString(), end: getTodayString() });
 
             useEffect(() => {
@@ -377,9 +382,8 @@
                     const target = employees.find(e => e.lineId === lineProfile.userId);
                     if (target) {
                         setCurrentUser({ ...target, photoURL: lineProfile.pictureUrl });
-                        // 🟢 載入使用者專屬的橫幅顏色
-                        const savedColor = localStorage.getItem(`bannerColor_${target.id}`);
-                        if (savedColor) setBannerColor(savedColor);
+                        // 🟢 使用資料庫儲存的專屬顏色，若無則預設綠色
+                        setBannerColor(target.bannerColor || 'bg-[#06C755]');
                     } else {
                         setCurrentUser({ error: "not_found", lineId: lineProfile.userId, displayName: lineProfile.displayName });
                     }
@@ -396,9 +400,19 @@
                     const data = await callApi("getInitialData");
                     if (data && !data.error) {
                         setEmployees(data.employees || []);
-                        setLeaveRequests(data.leaveRequests?.filter(r => r.leaveType !== '補打卡').map(r => ({...r, type: 'leave'})) || []);
-                        setMakeupRequests(data.leaveRequests?.filter(r => r.leaveType === '補打卡').map(r => ({...r, type: 'makeup'})) || []);
+                        
+                        // 🟢 運用新寫入的 RecordType 確保資料分類絕對精準
+                        const parsedReqs = (data.leaveRequests || []).map(r => {
+                            // 向下相容：若新欄位 RecordType (第16欄) 沒資料，就用舊邏輯判斷
+                            const explicitType = r.RecordType || r[Object.keys(r)[15]];
+                            const recordType = explicitType || (r[Object.keys(r)[3]] === '補打卡' ? 'makeup' : 'leave');
+                            return { ...r, type: recordType };
+                        });
+
+                        setLeaveRequests(parsedReqs.filter(r => r.type === 'leave'));
+                        setMakeupRequests(parsedReqs.filter(r => r.type === 'makeup'));
                         setAttendanceRecords(data.attendance || []);
+                        
                         localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(data.employees || []));
                         localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(data.attendance || []));
                     }
@@ -418,14 +432,12 @@
                 }) || null;
             }, [currentUser, attendanceRecords]);
 
-            // 🟢 新增：特休使用量統計
             const calculateUsedAnnualLeave = useMemo(() => {
                 if (!currentUser || currentUser.error) return 0;
                 return leaveRequests.filter(r => r.applicantId === currentUser.id && r.leaveType === '特休' && r.status !== '不通過' && r.status !== '已取消')
                     .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
             }, [currentUser, leaveRequests]);
 
-            // 🟢 新增：所有假別總用量統計
             const calculateTotalLeave = useMemo(() => {
                 if (!currentUser || currentUser.error) return 0;
                 return leaveRequests.filter(r => r.applicantId === currentUser.id && r.status !== '不通過' && r.status !== '已取消')
@@ -443,27 +455,31 @@
                 return allRequests;
             }, [currentUser, leaveRequests, makeupRequests]);
 
-            // 🟢 新增：待審核代理申請數量
             const pendingDeputyRequests = useMemo(() => {
                 if (!currentUser || currentUser.error) return [];
                 return leaveRequests.filter(r => r.deputyId === currentUser.id && r.deputyStatus === 'pending' && r.status === '待簽核');
             }, [currentUser, leaveRequests]);
 
+            // 🟢 將選擇的顏色更新至後端資料庫
             const handleBannerColorChange = (color) => {
                 setBannerColor(color);
                 setIsColorPickerOpen(false);
-                if(currentUser) localStorage.setItem(`bannerColor_${currentUser.id}`, color);
+                if(currentUser) {
+                    const newEmployees = employees.map(emp => emp.id === currentUser.id ? { ...emp, bannerColor: color } : emp);
+                    setEmployees(newEmployees);
+                    localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(newEmployees));
+                    // 異步呼叫 API，不需等待 UI 即可更新
+                    callApi("updateBannerColor", { employeeId: currentUser.id, color }).catch(e => console.error(e));
+                }
             };
 
             const handleTabChange = (tab) => {
                 setActiveTab(tab);
-                // 🟢 阻擋自動填寫：切換至管理分籤時，強制重置表單
                 if(tab === 'admin') {
                     setEmpForm({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
                 }
             };
 
-            // 🟢 新增：Excel 匯出邏輯
             const handleExportExcel = (type) => {
                 if (!exportDates.start || !exportDates.end) {
                     showAlert('錯誤', '請選擇完整的起始與結束日期', 'error'); return;
@@ -477,7 +493,11 @@
 
                 if (type === 'leave') {
                     const allReq = [...leaveRequests, ...makeupRequests];
-                    const filtered = allReq.filter(r => r.applyTime.substring(0,10) >= exportDates.start && r.applyTime.substring(0,10) <= exportDates.end);
+                    const filtered = allReq.filter(r => {
+                        const reqDate = r.applyTime.replace(/\//g, '-').substring(0, 10);
+                        return reqDate >= exportDates.start && reqDate <= exportDates.end;
+                    });
+                    
                     dataToExport = filtered.map(r => ({
                         '單號': r.requestId,
                         '申請人': r.applicantName,
@@ -493,12 +513,12 @@
                     filename = `出勤單據紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
                 } else if (type === 'attendance') {
                     const filtered = attendanceRecords.filter(r => {
-                        const dateStr = typeof r.date === 'string' ? r.date.substring(0, 10) : '';
+                        const dateStr = typeof r.date === 'string' ? r.date.substring(0, 10).replace(/\//g, '-') : '';
                         return dateStr >= exportDates.start && dateStr <= exportDates.end;
                     });
                     dataToExport = filtered.map(r => ({
                         '員工姓名': employees.find(e => e.id === r.employeeId)?.name || r.employeeId,
-                        '打卡日期': typeof r.date === 'string' ? r.date.substring(0, 10) : r.date,
+                        '打卡日期': typeof r.date === 'string' ? r.date.substring(0, 10).replace(/\//g, '-') : r.date,
                         '上班時間': r.checkInTime || '',
                         '下班時間': r.checkOutTime || ''
                     }));
@@ -655,7 +675,7 @@
 
             const handleSaveEmployee = async (e) => {
                 e.preventDefault();
-                const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0 };
+                const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0, bannerColor: 'bg-[#06C755]' };
                 const updatedList = empForm.isEdit ? employees.map(emp => emp.id === empForm.id ? newEmployee : emp) : [...employees, newEmployee];
                 setEmployees(updatedList);
                 localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(updatedList));
@@ -805,7 +825,7 @@
                     </nav>
 
                     <div className="max-w-6xl mx-auto px-4 py-8">
-                        {/* 🟢 修正 1 & 2 & 3：自訂顏色橫幅、代理人通知、請假數據統計 */}
+                        {/* 🟢 自訂顏色橫幅、代理人通知、請假數據統計 */}
                         <div className={`${bannerColor} rounded-2xl p-6 mb-8 text-white relative shadow-md overflow-visible transition-colors duration-500`}>
                             <div className="absolute top-4 right-4">
                                 <button onClick={() => setIsColorPickerOpen(!isColorPickerOpen)} className="p-2 bg-white/20 hover:bg-white/30 rounded-full backdrop-blur-sm transition-all"><Palette className="w-5 h-5"/></button>
@@ -884,19 +904,23 @@
                                 )}
                                 {activeTab === 'admin' && (
                                     <div className="space-y-6">
-                                        <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
-                                            {/* 🟢 修正 5：防自動填寫 */}
-                                            <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
-                                            <form onSubmit={handleSaveEmployee} className="space-y-3" autoComplete="off">
-                                                <input type="text" required autoComplete="new-password" placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
-                                                <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
-                                                <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
-                                                <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
-                                                <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
-                                            </form>
-                                        </div>
+                                        {/* 🟢 權限分離：僅管理者可新增員工 */}
+                                        {currentUser.role === '管理者' && (
+                                            <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
+                                                <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
+                                                <form onSubmit={handleSaveEmployee} className="space-y-3" autoComplete="off">
+                                                    <input type="text" name="fakeusernameremembered" style={{display:'none'}} aria-hidden="true" />
+                                                    <input type="password" name="fakepasswordremembered" style={{display:'none'}} aria-hidden="true" />
+                                                    
+                                                    <input type="text" required autoComplete="new-password" placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
+                                                    <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
+                                                    <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
+                                                    <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
+                                                    <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
+                                                </form>
+                                            </div>
+                                        )}
 
-                                        {/* 🟢 修正 4：新增 Excel 匯出區塊 */}
                                         <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-5">
                                             <h3 className="font-bold text-blue-800 mb-4 flex items-center"><Download className="w-4 h-4 mr-2"/>資料匯出 (Excel)</h3>
                                             <div className="space-y-3">
@@ -909,8 +933,8 @@
                                                     <input type="date" className="w-full border rounded p-2 text-sm outline-none" value={exportDates.end} onChange={e => setExportDates({...exportDates, end: e.target.value})}/>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-2 pt-2">
-                                                    <button onClick={() => handleExportExcel('attendance')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors">匯出打卡</button>
-                                                    <button onClick={() => handleExportExcel('leave')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors">匯出請假</button>
+                                                    <button onClick={() => handleExportExcel('attendance')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors shadow-sm">匯出打卡</button>
+                                                    <button onClick={() => handleExportExcel('leave')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors shadow-sm">匯出請假</button>
                                                 </div>
                                             </div>
                                         </div>
