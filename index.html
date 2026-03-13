@@ -1,214 +1,1051 @@
-const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-// 🔴 您提供的 LINE 憑證與管理者 ID
-const LINE_ACCESS_TOKEN = "FACu1PFpFIsuT3ndVjA7OhPgX8x5dZCDeqlyQdeGqfC7NQnsWfHR1SAlTXwBVijWogQ/9/38NNA6O4xtTl/IKx7kHtcdmBE9bgvcKC+pgFru6NPsU86JQXYSmA8GlCy6fTNnGJm39+ty21ak1f8dbQdB04t89/1O/w1cDnyilFU=";
-const ADMIN_LINE_USER_ID = "U7ecbd05a32c5d3cba45025ed23a1adb3";
-
-function sendLineNotification(userId, message) {
-  try {
-    const url = "https://api.line.me/v2/bot/message/push";
-    const payload = {
-      "to": userId,
-      "messages": [{ "type": "text", "text": message }]
-    };
-    const options = {
-      "method": "post",
-      "headers": {
-        "Authorization": "Bearer " + LINE_ACCESS_TOKEN,
-        "Content-Type": "application/json"
-      },
-      "payload": JSON.stringify(payload),
-      "muteHttpExceptions": true 
-    };
-    UrlFetchApp.fetch(url, options);
-  } catch (error) {
-    console.error("LINE Push Error:", error);
-  }
-}
-
-function doGet(e) {
-  return ContentService.createTextOutput(JSON.stringify({ status: "GAS API is running seamlessly." }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function doPost(e) {
-  const lock = LockService.getScriptLock();
-  lock.tryLock(10000); 
-
-  try {
-    const postData = e.postData ? e.postData.contents : "{}";
-    const data = JSON.parse(postData);
-    const action = data.action;
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Avisotech 出勤管理系統</title>
     
-    const sheetEmployees = ss.getSheetByName("Employees");
-    const sheetLeaves = ss.getSheetByName("LeaveRequests");
-    const sheetAttendance = ss.getSheetByName("Attendance");
-
-    if (!sheetEmployees || !sheetLeaves || !sheetAttendance) {
-       throw new Error("錯誤：找不到指定的工作表");
-    }
-
-    let result = {};
-
-    if (action === "getInitialData") {
-      let empData = getData(sheetEmployees);
-      result.employees = empData.map(emp => ({
-        id: emp[Object.keys(emp)[0]], 
-        name: emp[Object.keys(emp)[1]], 
-        role: emp[Object.keys(emp)[2]], 
-        lineId: emp[Object.keys(emp)[3]], 
-        annualLeaveQuota: emp[Object.keys(emp)[4]],
-        avatarColor: emp[Object.keys(emp)[6]],
-        bannerColor: emp[Object.keys(emp)[7]] // 🟢 讀取 H 欄的橫幅顏色
-      }));
-      result.leaveRequests = getData(sheetLeaves);
-      result.attendance = getData(sheetAttendance);
-    }
-    else if (action === "saveEmployee") {
-      const emp = data.payload;
-      const rows = sheetEmployees.getDataRange().getValues();
-      let rowIndex = -1;
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] == emp.id) { 
-          rowIndex = i + 1;
-          break;
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 引入 LINE LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <!-- 引入 SheetJS 處理 Excel 匯出 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        body { -webkit-tap-highlight-color: transparent; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
+        @keyframes pulse-subtle { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .animate-pulse-subtle { animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        
+        .initial-loader-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; background-color: #f9fafb;
         }
-      }
-      if (rowIndex > 0) {
-        sheetEmployees.getRange(rowIndex, 2).setValue(emp.name);
-        sheetEmployees.getRange(rowIndex, 3).setValue(emp.role);
-        sheetEmployees.getRange(rowIndex, 4).setValue(emp.lineId); 
-        sheetEmployees.getRange(rowIndex, 5).setValue(emp.annualLeaveQuota);
-        if(emp.avatarColor) sheetEmployees.getRange(rowIndex, 7).setValue(emp.avatarColor);
-        // 保留原有的 bannerColor，若是新設定則覆寫
-        if(emp.bannerColor) sheetEmployees.getRange(rowIndex, 8).setValue(emp.bannerColor);
-      } else {
-        sheetEmployees.appendRow([
-          emp.id, emp.name, emp.role, emp.lineId, emp.annualLeaveQuota, '', emp.avatarColor || 'bg-blue-500', emp.bannerColor || 'bg-[#06C755]'
-        ]);
-      }
-      result.success = true;
-    }
-    // 🟢 新增：專門處理橫幅顏色更新的 API
-    else if (action === "updateBannerColor") {
-      const { employeeId, color } = data.payload;
-      const rows = sheetEmployees.getDataRange().getValues();
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] == employeeId) {
-          sheetEmployees.getRange(i + 1, 8).setValue(color); // 寫入第 8 欄
-          break;
-        }
-      }
-      result.success = true;
-    }
-    else if (action === "addRequest") {
-      const req = data.payload;
-      sheetLeaves.appendRow([
-        req.requestId, req.applicantId, req.applicantName, req.leaveType || req.makeupType || '補打卡',
-        req.startDate || req.targetDate, req.startSession || req.targetTime, 
-        req.endDate || '', req.endSession || '', req.reason, 
-        req.status, req.applyTime, 
-        req.deputyId || '', req.deputyStatus || '', '', '', 
-        req.type // 🟢 寫入第 16 欄 RecordType
-      ]);
-      
-      const typeStr = req.type === 'leave' ? `【請假】${req.leaveType}` : `【補打卡】${req.makeupType}`;
-      const msg = `🔔 系統通知\n${req.applicantName} 剛剛提交了一份單據。\n類型：${typeStr}\n事由：${req.reason}\n請至系統進行簽核。`;
-      sendLineNotification(ADMIN_LINE_USER_ID, msg);
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #06C755; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
 
-      // 發送代理人通知
-      if (req.deputyId) {
-        const empRows = sheetEmployees.getDataRange().getValues();
-        let deputyLineId = null;
-        for (let i = 1; i < empRows.length; i++) {
-          if (empRows[i][0] == req.deputyId) {
-            deputyLineId = empRows[i][3];
-            break;
-          }
-        }
-        if (deputyLineId) {
-          const timeStr = req.type === 'leave' ? `${req.startDate} 至 ${req.endDate}` : req.targetDate;
-          const deputyMsg = `🔔 代理任務通知\n${req.applicantName} 指定您為職務代理人。\n時間：${timeStr}\n請至系統確認是否同意代理。`;
-          sendLineNotification(deputyLineId, deputyMsg);
-        }
-      }
-      result.success = true;
-    }
-    else if (action === "updateRequestStatus") {
-      const { requestId, status, approverName, approvalTime, deputyStatus } = data.payload;
-      const rows = sheetLeaves.getDataRange().getValues();
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] == requestId) { 
-          if (status) sheetLeaves.getRange(i + 1, 10).setValue(status);
-          if (approverName) sheetLeaves.getRange(i + 1, 14).setValue(approverName);
-          if (approvalTime) sheetLeaves.getRange(i + 1, 15).setValue(approvalTime);
-          if (deputyStatus) sheetLeaves.getRange(i + 1, 13).setValue(deputyStatus);
-          break;
-        }
-      }
-      result.success = true;
-    }
-    else if (action === "editRequest") {
-      const req = data.payload;
-      const rows = sheetLeaves.getDataRange().getValues();
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] == req.requestId) {
-          sheetLeaves.getRange(i + 1, 4).setValue(req.leaveType || req.makeupType || '補打卡');
-          sheetLeaves.getRange(i + 1, 5).setValue(req.startDate || req.targetDate);
-          sheetLeaves.getRange(i + 1, 6).setValue(req.startSession || req.targetTime);
-          sheetLeaves.getRange(i + 1, 7).setValue(req.endDate || '');
-          sheetLeaves.getRange(i + 1, 8).setValue(req.endSession || '');
-          sheetLeaves.getRange(i + 1, 9).setValue(req.reason);
-          sheetLeaves.getRange(i + 1, 12).setValue(req.deputyId || '');
-          sheetLeaves.getRange(i + 1, 13).setValue(req.deputyStatus || '');
-          sheetLeaves.getRange(i + 1, 16).setValue(req.type); // 🟢 確保編輯時也更新 Type
-          break;
-        }
-      }
-      result.success = true;
-    }
-    else if (action === "clockInOrOut") {
-      const rec = data.payload;
-      const rows = sheetAttendance.getDataRange().getValues();
-      let found = false;
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][1] == rec.employeeId && rows[i][2] == rec.date) {
-           sheetAttendance.getRange(i + 1, 5).setValue(rec.checkOutTime);
-           found = true;
-           break;
-        }
-      }
-      if (!found) {
-        sheetAttendance.appendRow([
-          rec.recordId, rec.employeeId, rec.date, rec.checkInTime, '', '正常'
-        ]);
-      }
-      result.success = true;
-    }
+    <div id="root">
+        <div class="initial-loader-container">
+            <div class="loader"></div>
+            <p style="margin-top: 15px; color: #6b7280; font-weight: bold; font-family: sans-serif;">系統載入中...</p>
+        </div>
+    </div>
 
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
+        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette } from 'https://esm.sh/lucide-react@0.263.1';
 
-  } catch (e) {
-    return ContentService.createTextOutput(JSON.stringify({ error: e.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } finally {
-    lock.releaseLock();
-  }
-}
+        // 🟢 GAS 網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_10';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_10';
+        
+        // 🔴 LIFF ID
+        const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
+        
+        const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
+        const BANNER_COLORS = ['bg-[#06C755]', 'bg-blue-600', 'bg-indigo-600', 'bg-violet-600', 'bg-rose-600', 'bg-orange-600', 'bg-slate-800'];
 
-function getData(sheet) {
-  if (!sheet) return [];
-  const rows = sheet.getDataRange().getValues();
-  if (rows.length < 2) return [];
-  const headers = rows[0];
-  const data = [];
-  for (let i = 1; i < rows.length; i++) {
-    let row = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = rows[i][j];
-    }
-    data.push(row);
-  }
-  return data;
-}
+        const callApi = async (action, payload = {}) => {
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    redirect: 'follow',
+                    body: JSON.stringify({ action, payload })
+                });
+                return await response.json();
+            } catch (error) {
+                console.error("API Error:", error);
+                throw error;
+            }
+        };
+
+        // 🟢 加入強健的時區與格式解析器 (防止 1899-12-30T 再次出現)
+        const formatTimeDisplay = (val) => {
+            if (!val) return '';
+            if (typeof val === 'string' && val.includes('1899-12-30T')) {
+                const utcDate = new Date(val);
+                if (!isNaN(utcDate.getTime())) {
+                    utcDate.setUTCHours(utcDate.getUTCHours() + 8); // 加回台灣 8 小時
+                    return `${String(utcDate.getUTCHours()).padStart(2, '0')}:${String(utcDate.getUTCMinutes()).padStart(2, '0')}`;
+                }
+            }
+            if (typeof val === 'string' && val.length >= 5) return val.substring(0, 5);
+            return String(val);
+        };
+
+        const getTodayString = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; };
+        const getNowTimeString = () => new Date().toTimeString().substring(0, 5);
+        
+        const calculateDuration = (start, startSess, end, endSess) => {
+            const d1 = new Date(start).getTime(), d2 = new Date(end).getTime();
+            if (isNaN(d1) || isNaN(d2)) return 0;
+            let total = Math.ceil(Math.abs(d2 - d1) / (86400000));
+            if (d1 === d2) return (startSess === endSess) ? 0.5 : 1;
+            total += 1;
+            if (startSess === '下午') total -= 0.5;
+            if (endSess === '上午') total -= 0.5;
+            return total > 0 ? total : 0;
+        };
+
+        const getStatusColor = (status) => {
+            switch (status) {
+                case '通過': return 'bg-green-100 text-green-700 border-green-200';
+                case '不通過': return 'bg-red-100 text-red-700 border-red-200';
+                case '已取消': return 'bg-gray-100 text-gray-500 border-gray-200';
+                default: return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+            }
+        };
+
+        const getStatusIcon = (status) => {
+            switch (status) {
+                case '通過': return <CheckCircle2 className="w-4 h-4 mr-1" />;
+                case '不通過': return <XCircle className="w-4 h-4 mr-1" />;
+                case '已取消': return <Ban className="w-4 h-4 mr-1" />;
+                default: return <Clock className="w-4 h-4 mr-1" />;
+            }
+        };
+
+        const isManagementRole = (role) => ['管理者', '簽核者'].includes(role);
+
+        const CompanyLogo = ({ size = 'medium', className = '' }) => {
+            const sizeClasses = { small: 'h-6 text-base', medium: 'h-8 text-xl', large: 'h-12 text-3xl' };
+            return (
+                <div className={`flex items-center ${className}`}>
+                    <div className={`relative flex items-center justify-center ${size === 'small' ? 'w-6 h-6' : size === 'large' ? 'w-12 h-12' : 'w-8 h-8'} bg-gradient-to-br from-[#06C755] to-emerald-500 rounded-lg text-white font-bold mr-2 shadow-sm shrink-0`}>
+                        <span className="z-10">A</span>
+                    </div>
+                    <span className={`font-bold text-gray-800 tracking-tight ${sizeClasses[size]}`}>
+                        <span className="text-[#06C755]">Aviso</span><span className="text-gray-600">tech</span>
+                    </span>
+                </div>
+            );
+        };
+
+        const Modal = ({ isOpen, type, title, message, onConfirm, onClose }) => {
+            if (!isOpen) return null;
+            let icon = <Info className="w-10 h-10 text-blue-500" />;
+            let confirmBtnClass = "bg-[#06C755] hover:bg-green-600";
+            if (type === 'error') { icon = <AlertCircle className="w-10 h-10 text-red-500" />; confirmBtnClass = "bg-red-600 hover:bg-red-700"; } 
+            else if (type === 'success') { icon = <CheckCircle2 className="w-10 h-10 text-green-500" />; confirmBtnClass = "bg-[#06C755] hover:bg-green-600"; } 
+            else if (type === 'confirm') { icon = <AlertTriangle className="w-10 h-10 text-orange-500" />; confirmBtnClass = "bg-orange-600 hover:bg-orange-700"; }
+            
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
+                        <div className="p-6 flex flex-col items-center text-center">
+                            <div className="mb-4 bg-gray-50 p-3 rounded-full">{icon}</div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">{title}</h3>
+                            <div className="text-gray-500 mb-6 text-sm leading-relaxed whitespace-pre-wrap break-all">{message}</div>
+                            <div className="flex w-full space-x-3">
+                                {type === 'confirm' && ( <button onClick={onClose} className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors">取消</button> )}
+                                <button onClick={() => { if (onConfirm) onConfirm(); else onClose(); }} className={`flex-1 py-3 px-4 text-white font-bold rounded-xl shadow-lg transition-colors ${confirmBtnClass}`}>{type === 'confirm' ? '確定' : '我知道了'}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const MakeupRequestModal = ({ isOpen, onClose, onSubmit, form, setForm }) => { 
+            if(!isOpen) return null; 
+            return(
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="bg-green-700 px-6 py-4 border-b border-green-600 flex items-center justify-between">
+                            <div className="flex items-center text-white"><ClipboardEdit className="w-5 h-5 mr-2"/><h3 className="font-bold">申請補打卡</h3></div>
+                            <button onClick={onClose} className="text-green-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                        </div>
+                        <form onSubmit={onSubmit} className="p-6 space-y-4">
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">補打卡日期</label><input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={form.targetDate} onChange={(e)=>setForm({...form,targetDate:e.target.value})}/></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-sm font-bold text-gray-700 mb-1">類型</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={form.makeupType} onChange={(e)=>setForm({...form,makeupType:e.target.value})}><option value="上班">上班</option><option value="下班">下班</option></select></div>
+                                <div><label className="block text-sm font-bold text-gray-700 mb-1">時間</label><input type="time" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={form.targetTime} onChange={(e)=>setForm({...form,targetTime:e.target.value})}/></div>
+                            </div>
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">事由</label><textarea required rows={2} className="w-full rounded-lg border border-gray-300 p-2.5 outline-none resize-none" value={form.reason} onChange={(e)=>setForm({...form,reason:e.target.value})}/></div>
+                            <button type="submit" className="w-full py-2.5 bg-green-700 hover:bg-green-800 text-white font-bold rounded-xl shadow-lg shadow-green-200">送出申請</button>
+                        </form>
+                    </div>
+                </div>
+            )
+        };
+
+        const CalendarDayModal = ({ isOpen, onClose, data, employees }) => {
+            if (!isOpen || !data) return null;
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden flex flex-col max-h-[80vh]">
+                        <div className="bg-emerald-600 px-6 py-4 border-b border-emerald-500 flex items-center justify-between shrink-0">
+                            <h3 className="font-bold text-white">{data.date} 紀錄明細</h3>
+                            <button onClick={onClose} className="text-emerald-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-6 space-y-4 overflow-y-auto">
+                            {data.attendance.length === 0 && data.requests.length === 0 && <div className="text-center text-gray-400 py-4 border border-dashed rounded-lg">當日無紀錄</div>}
+                            
+                            {data.attendance.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-gray-700 mb-2 border-b pb-1">📍 打卡紀錄</h4>
+                                    {data.attendance.map((att, idx) => (
+                                        <div key={idx} className="mb-2 text-sm bg-emerald-50 p-3 rounded-lg border border-emerald-100 shadow-sm">
+                                            <div className="font-bold text-emerald-800 mb-1">{employees.find(e=>e.id===att.employeeId)?.name}</div>
+                                            <div className="text-emerald-700 flex justify-between font-mono">
+                                                {/* 🟢 套用時間防護網，確保正確顯示 */}
+                                                <span>上班: {formatTimeDisplay(att.checkInTime) || '--:--'}</span>
+                                                <span>下班: {formatTimeDisplay(att.checkOutTime) || '--:--'}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {data.requests.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-gray-700 mb-2 border-b pb-1">📄 單據紀錄</h4>
+                                    {data.requests.map((req, idx) => (
+                                        <div key={idx} className={`mb-2 text-sm p-3 rounded-lg border shadow-sm ${req.type === 'leave' ? 'bg-blue-50 border-blue-100' : 'bg-orange-50 border-orange-100'}`}>
+                                            <div className={`font-bold mb-1 ${req.type === 'leave' ? 'text-blue-800' : 'text-orange-800'}`}>
+                                                {req.applicantName} - {req.type === 'leave' ? req.leaveType : `補打卡 (${req.makeupType})`}
+                                            </div>
+                                            <div className={`text-xs space-y-1 ${req.type === 'leave' ? 'text-blue-700' : 'text-orange-700'}`}>
+                                                <div className="font-mono">時間: {req.type === 'leave' ? `${req.startDate} ${req.startSession} ~ ${req.endDate} ${req.endSession}` : `${req.targetTime}`}</div>
+                                                <div>事由: {req.reason}</div>
+                                                <div>狀態: <span className="font-bold">{req.status}</span></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const EditRequestModal = ({ isOpen, onClose, onSubmit, reqData, setReqData, employees, currentUser }) => {
+            if (!isOpen || !reqData) return null;
+            const isLeave = reqData.type === 'leave';
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="bg-blue-600 px-6 py-4 border-b border-blue-500 flex items-center justify-between">
+                            <div className="flex items-center text-white"><Edit className="w-5 h-5 mr-2"/><h3 className="font-bold">編輯{isLeave ? '請假單' : '補打卡單'}</h3></div>
+                            <button onClick={onClose} className="text-blue-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                        </div>
+                        <form onSubmit={onSubmit} className="p-6 space-y-4">
+                            {isLeave ? (
+                                <>
+                                    <div className="flex gap-4">
+                                        <div className="flex-1">
+                                            <label className="block text-sm font-bold text-gray-700 mb-1">假別</label>
+                                            <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.leaveType} onChange={e=>setReqData({...reqData, leaveType: e.target.value})}>
+                                                <option>特休</option><option>事假</option><option>病假</option><option>公假</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-sm font-bold text-gray-700 mb-1">代理人</label>
+                                            <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.deputyId || ''} onChange={e=>setReqData({...reqData, deputyId: e.target.value})}>
+                                                <option value="">無代理</option>
+                                                {employees.filter(e=>e.id !== currentUser.id).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 items-end">
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">開始日期</label>
+                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.startDate} onChange={e=>setReqData({...reqData, startDate: e.target.value})}/>
+                                        </div>
+                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.startSession} onChange={e=>setReqData({...reqData, startSession: e.target.value})}><option>上午</option><option>下午</option></select>
+                                    </div>
+                                    <div className="flex gap-2 items-end">
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">結束日期</label>
+                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.endDate} onChange={e=>setReqData({...reqData, endDate: e.target.value})}/>
+                                        </div>
+                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.endSession} onChange={e=>setReqData({...reqData, endSession: e.target.value})}><option>上午</option><option>下午</option></select>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div><label className="block text-sm font-bold text-gray-700 mb-1">補打卡日期</label><input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetDate} onChange={e=>setReqData({...reqData, targetDate: e.target.value})}/></div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">類型</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.makeupType} onChange={e=>setReqData({...reqData, makeupType: e.target.value})}><option value="上班">上班</option><option value="下班">下班</option></select></div>
+                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">時間</label><input type="time" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetTime} onChange={e=>setReqData({...reqData, targetTime: e.target.value})}/></div>
+                                    </div>
+                                </>
+                            )}
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">事由</label><textarea required rows={2} className="w-full rounded-lg border border-gray-300 p-2.5 outline-none resize-none" value={reqData.reason} onChange={e=>setReqData({...reqData, reason: e.target.value})}/></div>
+                            <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-200 mt-2">確認修改並儲存</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        const EditEmployeeModal = ({ isOpen, onClose, onSubmit, employee, setEmployee }) => {
+            if (!isOpen || !employee) return null;
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                  <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex items-center justify-between">
+                    <div className="flex items-center"><Settings className="w-5 h-5 text-orange-600 mr-2" /><h3 className="font-bold text-orange-800">編輯員工資料</h3></div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                  </div>
+                  <form onSubmit={onSubmit} className="p-6 space-y-4" autoComplete="off">
+                    <input type="text" name="fakeusernameremembered" style={{display:'none'}} aria-hidden="true" />
+                    <input type="password" name="fakepasswordremembered" style={{display:'none'}} aria-hidden="true" />
+                    
+                    <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-500 mb-4 flex items-center"><Info className="w-4 h-4 mr-2" />員工 ID ({employee.id}) 無法修改</div>
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required autoComplete="new-password" className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
+                    <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required autoComplete="new-password" placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><label className="block text-sm font-bold text-gray-700 mb-1">系統權限</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={employee.role} onChange={(e) => setEmployee({...employee, role: e.target.value})}><option value="申請者">申請者</option><option value="簽核者">簽核者</option><option value="管理者">管理者</option></select></div>
+                      <div><label className="block text-sm font-bold text-gray-700 mb-1">特休額度</label><input type="number" step="0.5" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.annualLeaveQuota} onChange={(e) => setEmployee({...employee, annualLeaveQuota: parseFloat(e.target.value)})}/></div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">頭像顏色</label>
+                        <div className="grid grid-cols-9 gap-2">
+                            {AVATAR_COLORS.map(color => (
+                                <button key={color} type="button" onClick={() => setEmployee({...employee, avatarColor: color})} className={`w-6 h-6 rounded-full ${color} ${employee.avatarColor === color ? 'ring-2 ring-offset-2 ring-gray-400 scale-110' : ''} transition-all`}>
+                                    {employee.avatarColor === color && <Check className="w-3 h-3 text-white mx-auto" />}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <button type="submit" className="w-full py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-lg shadow-orange-200 mt-2">儲存變更</button>
+                  </form>
+                </div>
+              </div>
+            );
+        };
+
+        function LeaveApp() {
+            const [employees, setEmployees] = useState(() => { const cached = localStorage.getItem(CACHE_KEY_EMP); return cached ? JSON.parse(cached) : []; });
+            const [leaveRequests, setLeaveRequests] = useState([]);
+            const [attendanceRecords, setAttendanceRecords] = useState(() => { const cached = localStorage.getItem(CACHE_KEY_ATT); return cached ? JSON.parse(cached) : []; });
+            const [makeupRequests, setMakeupRequests] = useState([]);
+            
+            const [currentUser, setCurrentUser] = useState(null);
+            const [lineProfile, setLineProfile] = useState(null);
+            const [isAuthChecking, setIsAuthChecking] = useState(true);
+            const [isDataLoading, setIsDataLoading] = useState(false);
+            
+            const [isMakeupModalOpen, setIsMakeupModalOpen] = useState(false);
+            const [isEditEmpModalOpen, setIsEditEmpModalOpen] = useState(false);
+            
+            const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '' });
+            const [activeTab, setActiveTab] = useState('apply');
+            
+            const [leaveForm, setLeaveForm] = useState({ leaveType: '特休', startDate: '', endDate: '', startSession: '上午', endSession: '上午', reason: '', deputyId: '' });
+            const [makeupForm, setMakeupForm] = useState({ targetDate: getTodayString(), targetTime: '09:00', makeupType: '上班', reason: '' });
+            const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
+
+            const [viewMode, setViewMode] = useState('list'); 
+            const [currentMonth, setCurrentMonth] = useState(new Date());
+            const [calendarUserFilter, setCalendarUserFilter] = useState('all');
+            const [editingRequest, setEditingRequest] = useState(null);
+            const [selectedDateDetails, setSelectedDateDetails] = useState(null); 
+
+            // 橫幅顏色狀態
+            const [bannerColor, setBannerColor] = useState('bg-[#06C755]');
+            const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+
+            // Excel 匯出日期區間狀態
+            const [exportDates, setExportDates] = useState({ start: getTodayString(), end: getTodayString() });
+
+            useEffect(() => {
+                let isMounted = true;
+                fetchLatestData(); 
+                
+                const fallbackTimeout = setTimeout(() => {
+                    if (isMounted) setIsAuthChecking(false);
+                }, 8000);
+                
+                const initLiff = async () => {
+                    try {
+                        await liff.init({ liffId: MY_LIFF_ID });
+                        if (isMounted) {
+                            if (liff.isLoggedIn()) {
+                                const profile = await liff.getProfile();
+                                setLineProfile(profile);
+                            } else {
+                                setIsAuthChecking(false);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("LIFF 初始化失敗:", err);
+                        if (isMounted) setIsAuthChecking(false);
+                    }
+                };
+                initLiff();
+                
+                return () => { isMounted = false; clearTimeout(fallbackTimeout); };
+            }, []);
+
+            useEffect(() => {
+                if (lineProfile && employees.length > 0) {
+                    const target = employees.find(e => e.lineId === lineProfile.userId);
+                    if (target) {
+                        setCurrentUser({ ...target, photoURL: lineProfile.pictureUrl });
+                        setBannerColor(target.bannerColor || 'bg-[#06C755]');
+                    } else {
+                        setCurrentUser({ error: "not_found", lineId: lineProfile.userId, displayName: lineProfile.displayName });
+                    }
+                    setIsAuthChecking(false);
+                } else if (lineProfile && employees.length === 0 && !isDataLoading) {
+                     setCurrentUser({ error: "not_found", lineId: lineProfile.userId, displayName: lineProfile.displayName });
+                     setIsAuthChecking(false);
+                }
+            }, [lineProfile, employees, isDataLoading]);
+
+            // 🟢 資料取得時順便用防護網處理歷史髒資料
+            const fetchLatestData = async () => {
+                setIsDataLoading(true);
+                try {
+                    const data = await callApi("getInitialData");
+                    if (data && !data.error) {
+                        setEmployees(data.employees || []);
+                        
+                        const parsedReqs = (data.leaveRequests || []).map(r => {
+                            const explicitType = r.RecordType || r[Object.keys(r)[15]];
+                            const recordType = explicitType || (r[Object.keys(r)[3]] === '補打卡' ? 'makeup' : 'leave');
+                            return { ...r, type: recordType };
+                        });
+
+                        setLeaveRequests(parsedReqs.filter(r => r.type === 'leave'));
+                        setMakeupRequests(parsedReqs.filter(r => r.type === 'makeup'));
+                        
+                        // 🟢 將打卡時間預先透過 formatTimeDisplay 格式化，確保日曆不會再跑出 1899
+                        const parsedAttendance = (data.attendance || []).map(a => ({
+                            ...a,
+                            checkInTime: formatTimeDisplay(a.checkInTime),
+                            checkOutTime: formatTimeDisplay(a.checkOutTime)
+                        }));
+
+                        setAttendanceRecords(parsedAttendance);
+                        
+                        localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(data.employees || []));
+                        localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(parsedAttendance));
+                    }
+                } catch (error) { console.error("Fetch failed", error); } finally { setIsDataLoading(false); }
+            };
+
+            const showAlert = (title, message, type = 'alert') => setModal({ isOpen: true, type, title, message });
+            const showConfirm = (title, message, onConfirm) => setModal({ isOpen: true, type: 'confirm', title, message, onConfirm });
+            const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
+
+            const todayRecord = useMemo(() => {
+                if (!currentUser || currentUser.error) return null;
+                const today = getTodayString();
+                return attendanceRecords.find(r => r.employeeId === currentUser.id && r.date === today) || null;
+            }, [currentUser, attendanceRecords]);
+
+            const calculateUsedAnnualLeave = useMemo(() => {
+                if (!currentUser || currentUser.error) return 0;
+                return leaveRequests.filter(r => r.applicantId === currentUser.id && r.leaveType === '特休' && r.status !== '不通過' && r.status !== '已取消')
+                    .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
+            }, [currentUser, leaveRequests]);
+
+            const calculateTotalLeave = useMemo(() => {
+                if (!currentUser || currentUser.error) return 0;
+                return leaveRequests.filter(r => r.applicantId === currentUser.id && r.status !== '不通過' && r.status !== '已取消')
+                    .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
+            }, [currentUser, leaveRequests]);
+
+            const visibleRequests = useMemo(() => {
+                if (!currentUser || currentUser.error) return [];
+                let allRequests = [...leaveRequests, ...makeupRequests];
+                allRequests.sort((a, b) => new Date(b.applyTime).getTime() - new Date(a.applyTime).getTime());
+                const isAdminOrApprover = currentUser.role === '管理者' || currentUser.role === '簽核者';
+                if (!isAdminOrApprover) {
+                    allRequests = allRequests.filter(r => r.applicantId === currentUser.id || r.deputyId === currentUser.id);
+                }
+                return allRequests;
+            }, [currentUser, leaveRequests, makeupRequests]);
+
+            const pendingDeputyRequests = useMemo(() => {
+                if (!currentUser || currentUser.error) return [];
+                return leaveRequests.filter(r => r.deputyId === currentUser.id && r.deputyStatus === 'pending' && r.status === '待簽核');
+            }, [currentUser, leaveRequests]);
+
+            const handleBannerColorChange = (color) => {
+                setBannerColor(color);
+                setIsColorPickerOpen(false);
+                if(currentUser) {
+                    const newEmployees = employees.map(emp => emp.id === currentUser.id ? { ...emp, bannerColor: color } : emp);
+                    setEmployees(newEmployees);
+                    localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(newEmployees));
+                    callApi("updateBannerColor", { employeeId: currentUser.id, color }).catch(e => console.error(e));
+                }
+            };
+
+            const handleTabChange = (tab) => {
+                setActiveTab(tab);
+                if(tab === 'admin') {
+                    setEmpForm({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
+                }
+            };
+
+            const handleExportExcel = (type) => {
+                if (!exportDates.start || !exportDates.end) {
+                    showAlert('錯誤', '請選擇完整的起始與結束日期', 'error'); return;
+                }
+                if (exportDates.start > exportDates.end) {
+                    showAlert('錯誤', '起始日期不能大於結束日期', 'error'); return;
+                }
+
+                let dataToExport = [];
+                let filename = '';
+
+                if (type === 'leave') {
+                    const allReq = [...leaveRequests, ...makeupRequests];
+                    const filtered = allReq.filter(r => {
+                        const reqDate = r.applyTime.replace(/\//g, '-').substring(0, 10);
+                        return reqDate >= exportDates.start && reqDate <= exportDates.end;
+                    });
+                    
+                    dataToExport = filtered.map(r => ({
+                        '單號': r.requestId,
+                        '申請人': r.applicantName,
+                        '類型': r.type === 'leave' ? `請假 (${r.leaveType})` : `補打卡 (${r.makeupType})`,
+                        '開始時間': r.type === 'leave' ? `${r.startDate} ${r.startSession}` : `${r.targetDate} ${r.targetTime}`,
+                        '結束時間': r.type === 'leave' ? `${r.endDate} ${r.endSession}` : '',
+                        '事由': r.reason,
+                        '狀態': r.status,
+                        '申請時間': r.applyTime,
+                        '代理人': r.deputyName || '無',
+                        '簽核者': r.approverName || ''
+                    }));
+                    filename = `出勤單據紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
+                } else if (type === 'attendance') {
+                    const filtered = attendanceRecords.filter(r => {
+                        const dateStr = typeof r.date === 'string' ? r.date.substring(0, 10).replace(/\//g, '-') : '';
+                        return dateStr >= exportDates.start && dateStr <= exportDates.end;
+                    });
+                    dataToExport = filtered.map(r => ({
+                        '員工姓名': employees.find(e => e.id === r.employeeId)?.name || r.employeeId,
+                        '打卡日期': typeof r.date === 'string' ? r.date.substring(0, 10).replace(/\//g, '-') : r.date,
+                        '上班時間': r.checkInTime || '',
+                        '下班時間': r.checkOutTime || ''
+                    }));
+                    filename = `每日打卡紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
+                }
+
+                if (dataToExport.length === 0) {
+                    showAlert('提示', '此區間內沒有任何資料', 'alert'); return;
+                }
+
+                const ws = XLSX.utils.json_to_sheet(dataToExport);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "紀錄清單");
+                XLSX.writeFile(wb, filename);
+            };
+
+            const handleLineLogin = () => { 
+                if (!MY_LIFF_ID) {
+                    showAlert("系統提示", "尚未設定 MY_LIFF_ID，無法執行登入。", "error");
+                    return;
+                }
+                const currentUrl = window.location.href.split('?')[0]; 
+                liff.login({ redirectUri: currentUrl });
+            };
+
+            const handleLogout = () => { 
+                if (liff.isLoggedIn()) liff.logout(); 
+                window.location.reload();
+            };
+
+            const handleCheckIn = async () => {
+                if (!currentUser) return;
+                if (todayRecord && todayRecord.checkInTime) { showAlert('重複打卡', '今天已經上班打卡了', 'alert'); return; }
+                const nowTime = getNowTimeString();
+                const newRecord = { recordId: `ATT-${Date.now()}`, employeeId: currentUser.id, date: getTodayString(), checkInTime: nowTime, checkOutTime: '' };
+                const newRecords = [...attendanceRecords, newRecord];
+                setAttendanceRecords(newRecords);
+                localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(newRecords));
+                await callApi("clockInOrOut", newRecord);
+                showAlert('打卡成功', `上班時間：${nowTime}`, 'success');
+            };
+
+            const handleCheckOut = () => {
+                if (!currentUser || !todayRecord) { showAlert('錯誤', '請先上班打卡', 'error'); return; }
+                const nowTime = getNowTimeString();
+                const doCheckOut = async () => {
+                    const updatedRecords = attendanceRecords.map(r => r.recordId === todayRecord.recordId ? { ...r, checkOutTime: nowTime } : r);
+                    setAttendanceRecords(updatedRecords);
+                    localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(updatedRecords));
+                    await callApi("clockInOrOut", { employeeId: currentUser.id, date: getTodayString(), checkOutTime: nowTime });
+                    showAlert('打卡成功', `下班時間：${nowTime}`, 'success');
+                };
+                if (todayRecord.checkOutTime) showConfirm('確認', `已有下班紀錄 (${todayRecord.checkOutTime})，要更新為 ${nowTime} 嗎？`, () => { doCheckOut(); closeModal(); });
+                else doCheckOut();
+            };
+
+            const handleSubmitLeave = async (e) => {
+                e.preventDefault();
+                if (!currentUser) return;
+                if (new Date(leaveForm.startDate) > new Date(leaveForm.endDate)) { showAlert('錯誤', '結束日期不能早於開始日期', 'error'); return; }
+                let deputyInfo = { deputyId: '', deputyName: '', deputyStatus: 'none' };
+                if (leaveForm.deputyId) {
+                    const deputy = employees.find(e => e.id === leaveForm.deputyId);
+                    if (deputy) deputyInfo = { deputyId: deputy.id, deputyName: deputy.name, deputyStatus: 'pending' };
+                }
+                const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }), ...deputyInfo };
+                setLeaveRequests([newRequest, ...leaveRequests]); setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
+                showAlert('成功', '假單已送出，並通知代理人', 'success'); await callApi("addRequest", newRequest);
+            };
+
+            const handleSubmitMakeup = async (e) => {
+                e.preventDefault();
+                const newRequest = { type: 'makeup', requestId: `MK-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, targetDate: makeupForm.targetDate, targetTime: makeupForm.targetTime, makeupType: makeupForm.makeupType, reason: makeupForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }) };
+                setMakeupRequests([newRequest, ...makeupRequests]); setIsMakeupModalOpen(false); setMakeupForm({ ...makeupForm, reason: '' });
+                showAlert('成功', '補打卡申請已送出', 'success'); await callApi("addRequest", newRequest);
+            };
+
+            const handleDeputyAction = async (requestId, isAgreed) => {
+                const status = isAgreed ? 'agreed' : 'rejected';
+                setLeaveRequests(prev => prev.map(req => req.requestId === requestId ? { ...req, deputyStatus: status } : req));
+                showAlert('已回覆', `您已${isAgreed ? '同意' : '拒絕'}代理`, isAgreed ? 'success' : 'alert');
+                await callApi("updateRequestStatus", { requestId, deputyStatus: status });
+            };
+
+            const handleSubmitEditRequest = async (e) => {
+                e.preventDefault();
+                if (!currentUser || !editingRequest) return;
+                if (editingRequest.type === 'leave' && new Date(editingRequest.startDate) > new Date(editingRequest.endDate)) { 
+                    showAlert('錯誤', '結束日期不能早於開始日期', 'error'); return; 
+                }
+
+                let updatedReq = { ...editingRequest };
+                if (updatedReq.type === 'leave') {
+                    if (updatedReq.deputyId) {
+                        const deputy = employees.find(emp => emp.id === updatedReq.deputyId);
+                        if (deputy) {
+                            updatedReq.deputyName = deputy.name;
+                            updatedReq.deputyStatus = 'pending';
+                        }
+                    } else {
+                        updatedReq.deputyName = '';
+                        updatedReq.deputyStatus = 'none';
+                    }
+                }
+
+                if (updatedReq.type === 'leave') {
+                    setLeaveRequests(prev => prev.map(r => r.requestId === updatedReq.requestId ? updatedReq : r));
+                } else {
+                    setMakeupRequests(prev => prev.map(r => r.requestId === updatedReq.requestId ? updatedReq : r));
+                }
+
+                setEditingRequest(null);
+                showAlert('成功', '單據已更新並儲存', 'success');
+                await callApi("editRequest", updatedReq);
+            };
+
+            const handleApproval = async (req, isApproved) => {
+                const status = isApproved ? '通過' : '不通過';
+                const now = new Date().toLocaleString('zh-TW', { hour12: false });
+                const approvalData = { status, approverName: currentUser.name, approvalTime: now };
+                if (req.type === 'leave') setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
+                else {
+                    setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
+                    if (isApproved) {
+                         setAttendanceRecords(prev => {
+                            const existingIndex = prev.findIndex(rec => rec.employeeId === req.applicantId && rec.date === req.targetDate);
+                            if (existingIndex >= 0) {
+                                const updated = [...prev];
+                                if (req.makeupType === '上班') updated[existingIndex].checkInTime = req.targetTime + ':00';
+                                else updated[existingIndex].checkOutTime = req.targetTime + ':00';
+                                localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(updated));
+                                return updated;
+                            } else {
+                                const newRecord = { recordId: `ATT-MK-${Date.now()}`, employeeId: req.applicantId, date: req.targetDate, checkInTime: req.makeupType === '上班' ? req.targetTime + ':00' : null, checkOutTime: req.makeupType === '下班' ? req.targetTime + ':00' : null };
+                                const newRecords = [...prev, newRecord];
+                                localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(newRecords));
+                                return newRecords;
+                            }
+                        });
+                    }
+                }
+                await callApi("updateRequestStatus", { requestId: req.requestId, ...approvalData });
+            };
+
+            const handleCancelRequest = (req) => {
+                showConfirm('確認取消', '確定要取消此申請嗎？', async () => {
+                    const now = new Date().toLocaleString('zh-TW', { hour12: false });
+                    const updateData = { status: '已取消', approverName: currentUser?.name, approvalTime: now };
+                    if (req.type === 'leave') setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...updateData } : r));
+                    else setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...updateData } : r));
+                    closeModal(); await callApi("updateRequestStatus", { requestId: req.requestId, ...updateData });
+                });
+            };
+
+            const handleSaveEmployee = async (e) => {
+                e.preventDefault();
+                const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0, bannerColor: 'bg-[#06C755]' };
+                const updatedList = empForm.isEdit ? employees.map(emp => emp.id === empForm.id ? newEmployee : emp) : [...employees, newEmployee];
+                setEmployees(updatedList);
+                localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(updatedList));
+                setIsEditEmpModalOpen(false);
+                showAlert('成功', empForm.isEdit ? `已更新員工：${newEmployee.name}` : `已新增員工：${newEmployee.name}`, 'success'); 
+                await callApi("saveEmployee", newEmployee);
+            };
+
+            const renderCalendar = () => {
+                const year = currentMonth.getFullYear();
+                const month = currentMonth.getMonth();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const firstDay = new Date(year, month, 1).getDay();
+                const days = [];
+
+                let calRequests = visibleRequests;
+                let calAttendance = attendanceRecords;
+
+                if (isManagementRole(currentUser.role) && calendarUserFilter !== 'all') {
+                    calRequests = calRequests.filter(r => r.applicantId === calendarUserFilter);
+                    calAttendance = calAttendance.filter(r => r.employeeId === calendarUserFilter);
+                }
+
+                for (let i = 0; i < firstDay; i++) {
+                    days.push(<div key={`empty-${i}`} className="min-h-[80px] p-2 bg-gray-50/50 border border-gray-100"></div>);
+                }
+
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const dayAtt = calAttendance.filter(a => a.date === dateStr);
+                    
+                    const validReq = calRequests.filter(r => {
+                        if (r.type === 'makeup') return r.targetDate === dateStr;
+                        if (r.type === 'leave') return r.status === '通過' && dateStr >= r.startDate && dateStr <= r.endDate;
+                        return false;
+                    });
+
+                    days.push(
+                        <div key={d} onClick={() => setSelectedDateDetails({ date: dateStr, attendance: dayAtt, requests: validReq })} className="min-h-[80px] p-2 bg-white border border-gray-100 flex flex-col gap-1 cursor-pointer transition-colors hover:bg-gray-50 active:bg-gray-100">
+                            <div className={`text-xs font-bold ${dateStr === getTodayString() ? 'bg-emerald-500 text-white w-5 h-5 flex items-center justify-center rounded-full shadow-sm' : 'text-gray-500'}`}>{d}</div>
+                            <div className="flex-1 overflow-y-auto space-y-1 mt-1 scrollbar-hide pointer-events-none">
+                                {dayAtt.map((att, idx) => (
+                                    <div key={`att-${idx}`} className="text-[10px] leading-tight text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 truncate shadow-sm">
+                                        {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
+                                        {/* 🟢 這裡的資料已經透過 formatTimeDisplay 防護網處理過了 */}
+                                        {att.checkInTime ? `入${att.checkInTime}` : ''} {att.checkOutTime ? `出${att.checkOutTime}` : ''}
+                                    </div>
+                                ))}
+                                {validReq.map((req, idx) => (
+                                    <div key={`req-${idx}`} className={`text-[10px] leading-tight px-1 py-0.5 rounded border truncate shadow-sm ${req.type === 'leave' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
+                                        {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{req.applicantName}: </span>}
+                                        {req.type === 'leave' ? '請假' : req.makeupType}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                }
+
+                return (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in">
+                        <div className="p-3 flex justify-between items-center border-b border-gray-100 bg-gray-50">
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronLeft className="w-4 h-4 text-gray-600"/></button>
+                                <span className="font-bold text-gray-700">{year}年 {month + 1}月</span>
+                                <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronRight className="w-4 h-4 text-gray-600"/></button>
+                            </div>
+                            {isManagementRole(currentUser.role) && (
+                                <select className="text-xs font-bold border border-gray-200 rounded-lg p-1.5 bg-white text-gray-700 shadow-sm outline-none" value={calendarUserFilter} onChange={(e) => setCalendarUserFilter(e.target.value)}>
+                                    <option value="all">顯示所有人</option>
+                                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                                </select>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-7 text-center text-xs font-bold text-gray-500 bg-white border-b border-gray-100">
+                            <div className="py-2 text-red-400">日</div><div className="py-2">一</div><div className="py-2">二</div><div className="py-2">三</div><div className="py-2">四</div><div className="py-2">五</div><div className="py-2 text-red-400">六</div>
+                        </div>
+                        <div className="grid grid-cols-7 auto-rows-fr">
+                            {days}
+                        </div>
+                    </div>
+                );
+            };
+
+            if (isAuthChecking) return (<div className="initial-loader-container"><div className="loader"></div><p style={{marginTop:'15px',color:'#6b7280',fontWeight:'bold'}}>檢查身分中...</p></div>);
+            
+            if (!currentUser || currentUser.error) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                        <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
+                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-[#06C755]">
+                            <div className="flex justify-center mb-6"><CompanyLogo size="large" /></div>
+                            
+                            {currentUser?.error === "not_found" ? (
+                                <div className="space-y-4 text-left">
+                                    <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200">
+                                        <h2 className="font-bold text-lg mb-1 flex items-center"><AlertCircle className="w-5 h-5 mr-1" /> 尚未綁定系統</h2>
+                                        <p className="text-sm">您已成功登入 LINE，但尚未被加入員工名單中。</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded-xl">
+                                        <p className="text-sm text-gray-800 mb-2 font-bold">⚠️ 注意：這不是您平常加好友的 LINE ID</p>
+                                        <p className="text-xs text-gray-600 mb-3 leading-relaxed">這是系統為您產生的專屬「開發者 User ID」，特徵是永遠為 <strong className="text-[#06C755]">U 開頭的 33 碼字串</strong>。</p>
+                                        <p className="text-xs text-gray-500 mb-2">請點擊下方代碼複製，並交給管理員更新您的資料：</p>
+                                        <div className="flex bg-white border border-gray-200 shadow-inner rounded-lg p-3 items-center justify-center">
+                                            <code className="text-xs break-all text-[#06C755] font-bold select-all cursor-text">{currentUser.lineId}</code>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleLogout} className="w-full text-gray-500 text-sm mt-4 underline">切換其他 LINE 帳號 / 重新載入</button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <h1 className="text-xl font-bold mb-4 text-gray-800">系統登入</h1>
+                                    <p className="text-sm text-gray-600 mb-5">請點擊下方按鈕授權登入出勤系統</p>
+                                    
+                                    <button onClick={handleLineLogin} className="w-full bg-[#06C755] text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-green-600 flex items-center justify-center transition-colors">
+                                        <svg className="w-6 h-6 mr-2" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M24 10.304c0-4.364-4.505-7.896-10.038-7.896C8.428 2.408 3.93 5.94 3.93 10.304c0 3.863 3.513 7.151 8.356 7.799.324.07.766.216.88.514.1.265.064.676.03.88l-.133.801c-.04.226-.188.948.835.514 1.024-.434 5.532-3.268 7.51-5.56.126-.145.228-.276.321-.403a6.76 6.76 0 0 0 2.271-4.545zM8.36 12.02H6.551a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.808c.19 0 .346.155.346.347 0 .19-.155.346-.346.346H6.898v1h1.462c.19 0 .346.156.346.347 0 .19-.155.346-.346.346H6.898v1.282h1.462c.19 0 .346.156.346.346 0 .192-.155.347-.346.347zm4.27-.346c0 .192-.155.347-.346.347H10.58a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.704c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.358v2.627h1.358c.19 0 .346.156.346.346zm2.348.346a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347c.19 0 .346.155.346.347v3.32c0 .192-.155.347-.346.347zm5.52-.346c0 .192-.155.347-.346.347h-2.181a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h2.181c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.835v.982h1.835c.19 0 .346.156.346.347 0 .19-.155.346-.346.346h-1.835v1.298h1.835c.19 0 .346.156.346.346z"/></svg>
+                                        LINE 快速登入
+                                    </button>
+
+                                    <div className="mt-6 text-xs text-gray-500 bg-green-50 p-4 rounded-xl border border-green-100 text-left">
+                                        <p className="font-bold mb-1 text-green-800">💡 系統說明：</p>
+                                        <p className="leading-relaxed">點擊上方按鈕後，<strong className="text-green-700">系統將調用 LIFF 授權登入</strong>，完成後會自動導回系統並載入資料。</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 pb-20 relative">
+                    <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
+                    <MakeupRequestModal isOpen={isMakeupModalOpen} onClose={()=>setIsMakeupModalOpen(false)} onSubmit={handleSubmitMakeup} form={makeupForm} setForm={setMakeupForm}/>
+                    <EditEmployeeModal isOpen={isEditEmpModalOpen} onClose={()=>setIsEditEmpModalOpen(false)} onSubmit={handleSaveEmployee} employee={empForm} setEmployee={setEmpForm}/>
+                    <EditRequestModal isOpen={!!editingRequest} onClose={()=>setEditingRequest(null)} onSubmit={handleSubmitEditRequest} reqData={editingRequest} setReqData={setEditingRequest} employees={employees} currentUser={currentUser} />
+                    <CalendarDayModal isOpen={!!selectedDateDetails} onClose={() => setSelectedDateDetails(null)} data={selectedDateDetails} employees={employees} />
+
+                    <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-30">
+                        <div className="max-w-6xl mx-auto px-4 h-16 flex justify-between items-center">
+                            <CompanyLogo />
+                            <div className="flex items-center space-x-4">
+                                <div className="text-right text-sm hidden md:block"><div className="font-bold">{currentUser.name}</div><div className="text-gray-500">{currentUser.role}</div></div>
+                                {currentUser.photoURL && <img src={currentUser.photoURL} className="w-8 h-8 rounded-full border border-gray-200" alt="avatar" />}
+                                <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"><LogOut className="w-5 h-5"/></button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <div className="max-w-6xl mx-auto px-4 py-8">
+                        {/* 🟢 自訂顏色橫幅、代理人通知、請假數據統計 */}
+                        <div className={`${bannerColor} rounded-2xl p-6 mb-8 text-white relative shadow-md overflow-visible transition-colors duration-500`}>
+                            <div className="absolute top-4 right-4">
+                                <button onClick={() => setIsColorPickerOpen(!isColorPickerOpen)} className="p-2 bg-white/20 hover:bg-white/30 rounded-full backdrop-blur-sm transition-all"><Palette className="w-5 h-5"/></button>
+                                {isColorPickerOpen && (
+                                    <div className="absolute right-0 mt-2 bg-white p-3 rounded-xl shadow-xl z-50 w-48 animate-fade-in grid grid-cols-4 gap-2 border border-gray-100">
+                                        {BANNER_COLORS.map(color => (
+                                            <button key={color} onClick={() => handleBannerColorChange(color)} className={`w-8 h-8 rounded-full ${color} ${bannerColor === color ? 'ring-2 ring-offset-2 ring-gray-400 scale-110' : ''} transition-all`}></button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="relative z-10 mb-4">
+                                <h2 className="text-2xl font-bold mb-1">早安，{currentUser.name}</h2>
+                                <p className="text-white/80 text-sm mb-3">今天也要加油喔！</p>
+                                {isDataLoading && <div className="inline-flex items-center bg-white/20 px-3 py-1 rounded text-xs animate-pulse-subtle"><RefreshCw className="w-3 h-3 mr-2 animate-spin"/>資料同步中...</div>}
+                                
+                                {pendingDeputyRequests.length > 0 && (
+                                    <div className="mt-3 bg-red-500/90 backdrop-blur-sm border border-red-400 text-white px-4 py-2.5 rounded-xl flex items-center shadow-sm animate-bounce cursor-pointer" onClick={() => setActiveTab('apply')}>
+                                        <Bell className="w-5 h-5 mr-2 shrink-0" />
+                                        <span className="font-bold text-sm">您有 {pendingDeputyRequests.length} 筆代理任務需要確認！</span>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="bg-black/20 backdrop-blur-sm px-4 py-3 rounded-xl border border-white/10 text-center">
+                                    <div className="text-xs text-white/80 font-medium mb-1">特休餘額</div>
+                                    <div className="text-xl font-bold">{currentUser.annualLeaveQuota - calculateUsedAnnualLeave} <span className="text-sm font-normal">天</span></div>
+                                </div>
+                                <div className="bg-black/20 backdrop-blur-sm px-4 py-3 rounded-xl border border-white/10 text-center">
+                                    <div className="text-xs text-white/80 font-medium mb-1">已用特休</div>
+                                    <div className="text-xl font-bold">{calculateUsedAnnualLeave} <span className="text-sm font-normal">天</span></div>
+                                </div>
+                                <div className="bg-black/20 backdrop-blur-sm px-4 py-3 rounded-xl border border-white/10 text-center">
+                                    <div className="text-xs text-white/80 font-medium mb-1">累計總請假</div>
+                                    <div className="text-xl font-bold">{calculateTotalLeave} <span className="text-sm font-normal">天</span></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                            <div className="lg:col-span-4 space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden">
+                                    <div className="bg-emerald-600 px-5 py-3 flex items-center text-white font-bold"><Timer className="w-5 h-5 mr-2"/>每日打卡</div>
+                                    <div className="p-5">
+                                        <div className="flex gap-3 mb-4">
+                                            <button onClick={handleCheckIn} disabled={!!todayRecord?.checkInTime} className={`flex-1 flex flex-col items-center p-3 rounded-xl border-2 ${todayRecord?.checkInTime ? 'bg-gray-50 border-gray-100 text-gray-400' : 'bg-white border-emerald-100 text-emerald-600 hover:bg-emerald-50'}`}><PlayCircle className="w-8 h-8 mb-1"/>上班</button>
+                                            <button onClick={handleCheckOut} disabled={!todayRecord?.checkInTime} className={`flex-1 flex flex-col items-center p-3 rounded-xl border-2 ${!todayRecord?.checkInTime ? 'bg-gray-50 border-gray-100 text-gray-400' : 'bg-white border-orange-100 text-orange-600 hover:bg-orange-50'}`}><StopCircle className="w-8 h-8 mb-1"/>下班</button>
+                                        </div>
+                                        <div className="bg-gray-50 p-3 rounded text-sm space-y-1">
+                                            <div className="flex justify-between"><span className="text-gray-500">上班</span><span className="font-mono font-bold text-emerald-600">{todayRecord?.checkInTime || '--:--'}</span></div>
+                                            <div className="flex justify-between"><span className="text-gray-500">下班</span><span className="font-mono font-bold text-orange-600">{todayRecord?.checkOutTime || '--:--'}</span></div>
+                                        </div>
+                                        <button onClick={()=>setIsMakeupModalOpen(true)} className="w-full mt-3 text-sm text-emerald-600 underline text-center">忘記打卡？申請補登</button>
+                                    </div>
+                                </div>
+
+                                <div className="flex bg-white p-1 rounded-xl shadow-sm border">
+                                    <button onClick={() => handleTabChange('apply')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='apply'?'bg-emerald-50 text-emerald-600':'text-gray-400'}`}>假單</button>
+                                    {isManagementRole(currentUser.role) && <button onClick={() => handleTabChange('admin')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='admin'?'bg-orange-50 text-orange-600':'text-gray-400'}`}>管理</button>}
+                                </div>
+
+                                {activeTab === 'apply' && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                                        <h3 className="font-bold text-gray-700 mb-4 flex items-center"><FileText className="w-4 h-4 mr-2"/>填寫假單</h3>
+                                        <form onSubmit={handleSubmitLeave} className="space-y-4">
+                                            <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm" value={leaveForm.leaveType} onChange={e=>setLeaveForm({...leaveForm,leaveType:e.target.value})}><option>特休</option><option>事假</option><option>病假</option><option>公假</option></select><select className="flex-1 border rounded p-2 text-sm" value={leaveForm.deputyId} onChange={e=>setLeaveForm({...leaveForm,deputyId:e.target.value})}><option value="">無代理</option>{employees.filter(e=>e.id!==currentUser.id).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
+                                            <div className="text-xs text-gray-500 font-bold">期間</div>
+                                            <div className="flex gap-1"><input type="date" required className="flex-1 border rounded p-1 text-sm" value={leaveForm.startDate} onChange={e=>setLeaveForm({...leaveForm,startDate:e.target.value})}/><select className="w-16 border rounded text-sm" value={leaveForm.startSession} onChange={e=>setLeaveForm({...leaveForm,startSession:e.target.value})}><option>上午</option><option>下午</option></select></div>
+                                            <div className="flex gap-1"><input type="date" required className="flex-1 border rounded p-1 text-sm" value={leaveForm.endDate} onChange={e=>setLeaveForm({...leaveForm,endDate:e.target.value})}/><select className="w-16 border rounded text-sm" value={leaveForm.endSession} onChange={e=>setLeaveForm({...leaveForm,endSession:e.target.value})}><option>上午</option><option>下午</option></select></div>
+                                            <textarea required rows={2} className="w-full border rounded p-2 text-sm" placeholder="事由..." value={leaveForm.reason} onChange={e=>setLeaveForm({...leaveForm,reason:e.target.value})}/>
+                                            <button type="submit" className="w-full bg-[#06C755] text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-green-600">送出申請</button>
+                                        </form>
+                                    </div>
+                                )}
+                                {activeTab === 'admin' && (
+                                    <div className="space-y-6">
+                                        {/* 🟢 權限分離：僅管理者可新增員工 */}
+                                        {currentUser.role === '管理者' && (
+                                            <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
+                                                <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
+                                                <form onSubmit={handleSaveEmployee} className="space-y-3" autoComplete="off">
+                                                    <input type="text" name="fakeusernameremembered" style={{display:'none'}} aria-hidden="true" />
+                                                    <input type="password" name="fakepasswordremembered" style={{display:'none'}} aria-hidden="true" />
+                                                    
+                                                    <input type="text" required autoComplete="new-password" placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
+                                                    <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
+                                                    <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
+                                                    <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
+                                                    <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
+                                                </form>
+                                            </div>
+                                        )}
+
+                                        <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-5">
+                                            <h3 className="font-bold text-blue-800 mb-4 flex items-center"><Download className="w-4 h-4 mr-2"/>資料匯出 (Excel)</h3>
+                                            <div className="space-y-3">
+                                                <div className="flex gap-2 items-center">
+                                                    <span className="text-xs text-gray-500 font-bold shrink-0">起始</span>
+                                                    <input type="date" className="w-full border rounded p-2 text-sm outline-none" value={exportDates.start} onChange={e => setExportDates({...exportDates, start: e.target.value})}/>
+                                                </div>
+                                                <div className="flex gap-2 items-center">
+                                                    <span className="text-xs text-gray-500 font-bold shrink-0">結束</span>
+                                                    <input type="date" className="w-full border rounded p-2 text-sm outline-none" value={exportDates.end} onChange={e => setExportDates({...exportDates, end: e.target.value})}/>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 pt-2">
+                                                    <button onClick={() => handleExportExcel('attendance')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors shadow-sm">匯出打卡</button>
+                                                    <button onClick={() => handleExportExcel('leave')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors shadow-sm">匯出請假</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="lg:col-span-8">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg text-gray-700">
+                                        {activeTab === 'admin' ? '員工列表' : (viewMode === 'calendar' ? '出勤與請假日曆' : '近期紀錄')}
+                                    </h3>
+                                    {activeTab !== 'admin' && (
+                                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                                            <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center ${viewMode === 'list' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}><List className="w-3.5 h-3.5 mr-1"/>列表</button>
+                                            <button onClick={() => setViewMode('calendar')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center ${viewMode === 'calendar' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}><CalendarIcon className="w-3.5 h-3.5 mr-1"/>日曆</button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {activeTab === 'admin' ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {employees.map(emp => (
+                                            <div key={emp.id} className="bg-white p-4 rounded-xl border border-gray-100 flex items-center shadow-sm relative group">
+                                                <button onClick={() => { setEmpForm({...emp, isEdit:true}); setIsEditEmpModalOpen(true); }} className="absolute top-2 right-2 p-1 text-gray-400 hover:text-orange-600"><Edit className="w-4 h-4" /></button>
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${emp.avatarColor || 'bg-gray-400'}`}>{emp.name[0]}</div>
+                                                <div className="ml-3"><div className="font-bold text-sm">{emp.name} <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1 rounded ml-1">{emp.role}</span></div><div className="text-[10px] text-[#06C755] font-mono mt-0.5 w-32 truncate">{emp.lineId}</div><div className="text-xs text-gray-500 mt-0.5">特休: {emp.annualLeaveQuota}</div></div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    viewMode === 'calendar' ? renderCalendar() : (
+                                    <div className="space-y-3">
+                                        {visibleRequests.length === 0 ? <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed">無近期紀錄</div> : visibleRequests.map(req => {
+                                            const deputyEmp = req.deputyId ? employees.find(e => e.id === req.deputyId) : null;
+                                            const deputyName = deputyEmp ? deputyEmp.name : req.deputyName;
+
+                                            return (
+                                            <div key={req.requestId} className="bg-white p-4 rounded-xl border shadow-sm relative">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="font-bold text-sm">{req.applicantName}</div>
+                                                        <div className="text-xs text-gray-400">{req.applyTime.split(' ')[0]}</div>
+                                                    </div>
+                                                    <div className={`text-xs font-bold px-2 py-0.5 rounded ${getStatusColor(req.status)} flex items-center`}>{getStatusIcon(req.status)}{req.status}</div>
+                                                </div>
+                                                <div className="text-sm pl-3 border-l-2 border-gray-100 space-y-1.5">
+                                                    <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">{req.type==='leave'?'假別':'補登'}</span><span className="text-gray-800 font-bold">{req.leaveType || req.makeupType}</span></div>
+                                                    <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">時間</span><span className="text-gray-700 text-xs">{req.type==='leave' ? `${req.startDate} ~ ${req.endDate}` : `${req.targetDate} ${req.targetTime}`}</span></div>
+                                                    <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">事由</span><span className="text-gray-600 break-all">{req.reason}</span></div>
+                                                    
+                                                    {req.deputyId && (
+                                                        <div className="flex items-start mt-1">
+                                                            <span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">代理人</span>
+                                                            <span className="text-xs flex items-center text-gray-700 font-bold">
+                                                                {deputyName}
+                                                                {req.deputyStatus === 'pending' && <span className="ml-2 text-[10px] text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded-sm">待確認</span>}
+                                                                {req.deputyStatus === 'agreed' && <span className="ml-2 text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-sm">已同意</span>}
+                                                                {req.deputyStatus === 'rejected' && <span className="ml-2 text-[10px] text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-sm">已拒絕</span>}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex justify-end mt-3 gap-2">
+                                                    {req.deputyId === currentUser.id && req.deputyStatus === 'pending' && req.status === '待簽核' && (
+                                                        <div className="flex gap-2 mr-auto">
+                                                            <button onClick={() => handleDeputyAction(req.requestId, false)} className="text-xs bg-gray-50 text-gray-600 px-3 py-1.5 rounded-lg font-bold hover:bg-gray-100 border border-gray-200 transition-colors shadow-sm">拒絕代理</button>
+                                                            <button onClick={() => handleDeputyAction(req.requestId, true)} className="text-xs bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm">同意代理</button>
+                                                        </div>
+                                                    )}
+
+                                                    {currentUser.id === req.applicantId && req.status === '待簽核' && (
+                                                        <div className="flex gap-3">
+                                                            <button onClick={()=>setEditingRequest({...req})} className="text-xs text-blue-500 font-bold hover:text-blue-700 underline">編輯修改</button>
+                                                            <button onClick={()=>handleCancelRequest(req)} className="text-xs text-gray-400 underline hover:text-red-500">取消申請</button>
+                                                        </div>
+                                                    )}
+
+                                                    {currentUser.role === '簽核者' && req.status === '待簽核' && <><button onClick={()=>handleApproval(req,false)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100">不通過</button><button onClick={()=>handleApproval(req,true)} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded border border-green-100">通過</button></>}
+                                                </div>
+                                            </div>
+                                        )})}
+                                    </div>
+                                    )
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<LeaveApp />);
+    </script>
+</body>
+</html>
