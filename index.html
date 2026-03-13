@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Avisotech 出勤管理系統</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 引入 LINE LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    
+    <style>
+        body { -webkit-tap-highlight-color: transparent; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
+        @keyframes pulse-subtle { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .animate-pulse-subtle { animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        
+        .initial-loader-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; background-color: #f9fafb;
+        }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #06C755; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div id="root">
+        <div class="initial-loader-container">
+            <div class="loader"></div>
+            <p style="margin-top: 15px; color: #6b7280; font-weight: bold; font-family: sans-serif;">系統載入中...</p>
+        </div>
+    </div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
+        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning } from 'https://esm.sh/lucide-react@0.263.1';
+
+        // 🟢 已更新為最新的 GAS Web App 網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_4';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_4';
+        
+        // 🔴 請確保此處為您正確的 LIFF ID
+        const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
+        
+        const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
+
+        // 使用 fetch 呼叫 GAS，包含 redirect: 'follow' 處理跨域導向
+        const callApi = async (action, payload = {}) => {
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    redirect: 'follow',
+                    body: JSON.stringify({ action, payload })
+                });
+                return await response.json();
+            } catch (error) {
+                console.error("API Error:", error);
+                throw error;
+            }
+        };
+
+        const getTodayString = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; };
+        const getNowTimeString = () => new Date().toTimeString().split(' ')[0];
+        
+        const calculateDuration = (start, startSess, end, endSess) => {
+            const d1 = new Date(start).getTime(), d2 = new Date(end).getTime();
+            if (isNaN(d1) || isNaN(d2)) return 0;
+            let total = Math.ceil(Math.abs(d2 - d1) / (86400000));
+            if (d1 === d2) return (startSess === endSess) ? 0.5 : 1;
+            total += 1;
+            if (startSess === '下午') total -= 0.5;
+            if (endSess === '上午') total -= 0.5;
+            return total > 0 ? total : 0;
+        };
+
+        const getStatusColor = (status) => {
+            switch (status) {
+                case '通過': return 'bg-green-100 text-green-700 border-green-200';
+                case '不通過': return 'bg-red-100 text-red-700 border-red-200';
+                case '已取消': return 'bg-gray-100 text-gray-500 border-gray-200';
+                default: return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+            }
+        };
+
+        const getStatusIcon = (status) => {
+            switch (status) {
+                case '通過': return <CheckCircle2 className="w-4 h-4 mr-1" />;
+                case '不通過': return <XCircle className="w-4 h-4 mr-1" />;
+                case '已取消': return <Ban className="w-4 h-4 mr-1" />;
+                default: return <Clock className="w-4 h-4 mr-1" />;
+            }
+        };
+
+        const isManagementRole = (role) => ['管理者', '簽核者'].includes(role);
+
+        const CompanyLogo = ({ size = 'medium', className = '' }) => {
+            const sizeClasses = { small: 'h-6 text-base', medium: 'h-8 text-xl', large: 'h-12 text-3xl' };
+            return (
+                <div className={`flex items-center ${className}`}>
+                    <div className={`relative flex items-center justify-center ${size === 'small' ? 'w-6 h-6' : size === 'large' ? 'w-12 h-12' : 'w-8 h-8'} bg-gradient-to-br from-[#06C755] to-emerald-500 rounded-lg text-white font-bold mr-2 shadow-sm shrink-0`}>
+                        <span className="z-10">A</span>
+                    </div>
+                    <span className={`font-bold text-gray-800 tracking-tight ${sizeClasses[size]}`}>
+                        <span className="text-[#06C755]">Aviso</span><span className="text-gray-600">tech</span>
+                    </span>
+                </div>
+            );
+        };
+
+        const Modal = ({ isOpen, type, title, message, onConfirm, onClose }) => {
+            if (!isOpen) return null;
+            let icon = <Info className="w-10 h-10 text-blue-500" />;
+            let confirmBtnClass = "bg-[#06C755] hover:bg-green-600";
+            if (type === 'error') { icon = <AlertCircle className="w-10 h-10 text-red-500" />; confirmBtnClass = "bg-red-600 hover:bg-red-700"; } 
+            else if (type === 'success') { icon = <CheckCircle2 className="w-10 h-10 text-green-500" />; confirmBtnClass = "bg-[#06C755] hover:bg-green-600"; } 
+            else if (type === 'confirm') { icon = <AlertTriangle className="w-10 h-10 text-orange-500" />; confirmBtnClass = "bg-orange-600 hover:bg-orange-700"; }
+            
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
+                        <div className="p-6 flex flex-col items-center text-center">
+                            <div className="mb-4 bg-gray-50 p-3 rounded-full">{icon}</div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">{title}</h3>
+                            <div className="text-gray-500 mb-6 text-sm leading-relaxed whitespace-pre-wrap break-all">{message}</div>
+                            <div className="flex w-full space-x-3">
+                                {type === 'confirm' && ( <button onClick={onClose} className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors">取消</button> )}
+                                <button onClick={() => { if (onConfirm) onConfirm(); else onClose(); }} className={`flex-1 py-3 px-4 text-white font-bold rounded-xl shadow-lg transition-colors ${confirmBtnClass}`}>{type === 'confirm' ? '確定' : '我知道了'}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const MakeupRequestModal = ({ isOpen, onClose, onSubmit, form, setForm }) => { 
+            if(!isOpen) return null; 
+            return(
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="bg-green-700 px-6 py-4 border-b border-green-600 flex items-center justify-between">
+                            <div className="flex items-center text-white"><ClipboardEdit className="w-5 h-5 mr-2"/><h3 className="font-bold">申請補打卡</h3></div>
+                            <button onClick={onClose} className="text-green-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                        </div>
+                        <form onSubmit={onSubmit} className="p-6 space-y-4">
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">補打卡日期</label><input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={form.targetDate} onChange={(e)=>setForm({...form,targetDate:e.target.value})}/></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-sm font-bold text-gray-700 mb-1">類型</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={form.makeupType} onChange={(e)=>setForm({...form,makeupType:e.target.value})}><option value="上班">上班</option><option value="下班">下班</option></select></div>
+                                <div><label className="block text-sm font-bold text-gray-700 mb-1">時間</label><input type="time" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={form.targetTime} onChange={(e)=>setForm({...form,targetTime:e.target.value})}/></div>
+                            </div>
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">事由</label><textarea required rows={2} className="w-full rounded-lg border border-gray-300 p-2.5 outline-none resize-none" value={form.reason} onChange={(e)=>setForm({...form,reason:e.target.value})}/></div>
+                            <button type="submit" className="w-full py-2.5 bg-green-700 hover:bg-green-800 text-white font-bold rounded-xl shadow-lg shadow-green-200">送出申請</button>
+                        </form>
+                    </div>
+                </div>
+            )
+        };
+
+        // 🟢 新增：編輯單據用的 Modal
+        const EditRequestModal = ({ isOpen, onClose, onSubmit, reqData, setReqData, employees, currentUser }) => {
+            if (!isOpen || !reqData) return null;
+            const isLeave = reqData.type === 'leave';
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="bg-blue-600 px-6 py-4 border-b border-blue-500 flex items-center justify-between">
+                            <div className="flex items-center text-white"><Edit className="w-5 h-5 mr-2"/><h3 className="font-bold">編輯{isLeave ? '請假單' : '補打卡單'}</h3></div>
+                            <button onClick={onClose} className="text-blue-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                        </div>
+                        <form onSubmit={onSubmit} className="p-6 space-y-4">
+                            {isLeave ? (
+                                <>
+                                    <div className="flex gap-4">
+                                        <div className="flex-1">
+                                            <label className="block text-sm font-bold text-gray-700 mb-1">假別</label>
+                                            <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.leaveType} onChange={e=>setReqData({...reqData, leaveType: e.target.value})}>
+                                                <option>特休</option><option>事假</option><option>病假</option><option>公假</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-sm font-bold text-gray-700 mb-1">代理人</label>
+                                            <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.deputyId || ''} onChange={e=>setReqData({...reqData, deputyId: e.target.value})}>
+                                                <option value="">無代理</option>
+                                                {employees.filter(e=>e.id !== currentUser.id).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 items-end">
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">開始日期</label>
+                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.startDate} onChange={e=>setReqData({...reqData, startDate: e.target.value})}/>
+                                        </div>
+                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.startSession} onChange={e=>setReqData({...reqData, startSession: e.target.value})}><option>上午</option><option>下午</option></select>
+                                    </div>
+                                    <div className="flex gap-2 items-end">
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-gray-500 mb-1">結束日期</label>
+                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.endDate} onChange={e=>setReqData({...reqData, endDate: e.target.value})}/>
+                                        </div>
+                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.endSession} onChange={e=>setReqData({...reqData, endSession: e.target.value})}><option>上午</option><option>下午</option></select>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div><label className="block text-sm font-bold text-gray-700 mb-1">補打卡日期</label><input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetDate} onChange={e=>setReqData({...reqData, targetDate: e.target.value})}/></div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">類型</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.makeupType} onChange={e=>setReqData({...reqData, makeupType: e.target.value})}><option value="上班">上班</option><option value="下班">下班</option></select></div>
+                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">時間</label><input type="time" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetTime} onChange={e=>setReqData({...reqData, targetTime: e.target.value})}/></div>
+                                    </div>
+                                </>
+                            )}
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">事由</label><textarea required rows={2} className="w-full rounded-lg border border-gray-300 p-2.5 outline-none resize-none" value={reqData.reason} onChange={e=>setReqData({...reqData, reason: e.target.value})}/></div>
+                            <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-200 mt-2">確認修改並儲存</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        const EditEmployeeModal = ({ isOpen, onClose, onSubmit, employee, setEmployee }) => {
+            if (!isOpen || !employee) return null;
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                  <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex items-center justify-between">
+                    <div className="flex items-center"><Settings className="w-5 h-5 text-orange-600 mr-2" /><h3 className="font-bold text-orange-800">編輯員工資料</h3></div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                  </div>
+                  <form onSubmit={onSubmit} className="p-6 space-y-4">
+                    <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-500 mb-4 flex items-center"><Info className="w-4 h-4 mr-2" />員工 ID ({employee.id}) 無法修改</div>
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
+                    <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><label className="block text-sm font-bold text-gray-700 mb-1">系統權限</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={employee.role} onChange={(e) => setEmployee({...employee, role: e.target.value})}><option value="申請者">申請者</option><option value="簽核者">簽核者</option><option value="管理者">管理者</option></select></div>
+                      <div><label className="block text-sm font-bold text-gray-700 mb-1">特休額度</label><input type="number" step="0.5" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.annualLeaveQuota} onChange={(e) => setEmployee({...employee, annualLeaveQuota: parseFloat(e.target.value)})}/></div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">頭像顏色</label>
+                        <div className="grid grid-cols-9 gap-2">
+                            {AVATAR_COLORS.map(color => (
+                                <button key={color} type="button" onClick={() => setEmployee({...employee, avatarColor: color})} className={`w-6 h-6 rounded-full ${color} ${employee.avatarColor === color ? 'ring-2 ring-offset-2 ring-gray-400 scale-110' : ''} transition-all`}>
+                                    {employee.avatarColor === color && <Check className="w-3 h-3 text-white mx-auto" />}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <button type="submit" className="w-full py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-lg shadow-orange-200 mt-2">儲存變更</button>
+                  </form>
+                </div>
+              </div>
+            );
+        };
+
+        function LeaveApp() {
+            const [employees, setEmployees] = useState(() => { const cached = localStorage.getItem(CACHE_KEY_EMP); return cached ? JSON.parse(cached) : []; });
+            const [leaveRequests, setLeaveRequests] = useState([]);
+            const [attendanceRecords, setAttendanceRecords] = useState(() => { const cached = localStorage.getItem(CACHE_KEY_ATT); return cached ? JSON.parse(cached) : []; });
+            const [makeupRequests, setMakeupRequests] = useState([]);
+            
+            const [currentUser, setCurrentUser] = useState(null);
+            const [lineProfile, setLineProfile] = useState(null);
+            const [isAuthChecking, setIsAuthChecking] = useState(true);
+            const [isDataLoading, setIsDataLoading] = useState(false);
+            
+            const [isMakeupModalOpen, setIsMakeupModalOpen] = useState(false);
+            const [isEditEmpModalOpen, setIsEditEmpModalOpen] = useState(false);
+            const [editingRequest, setEditingRequest] = useState(null); // 🟢 編輯單據的 state
+            
+            const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '' });
+            const [activeTab, setActiveTab] = useState('apply');
+            
+            const [leaveForm, setLeaveForm] = useState({ leaveType: '特休', startDate: '', endDate: '', startSession: '上午', endSession: '上午', reason: '', deputyId: '' });
+            const [makeupForm, setMakeupForm] = useState({ targetDate: getTodayString(), targetTime: '09:00', makeupType: '上班', reason: '' });
+            const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
+
+            // 日曆與檢視模式的 State
+            const [viewMode, setViewMode] = useState('list'); 
+            const [currentMonth, setCurrentMonth] = useState(new Date());
+            const [calendarUserFilter, setCalendarUserFilter] = useState('all');
+
+            useEffect(() => {
+                if (lineProfile && employees.length > 0) {
+                    const target = employees.find(e => e.lineId === lineProfile.userId);
+                    if (target) {
+                        setCurrentUser({ ...target, photoURL: lineProfile.pictureUrl });
+                    } else {
+                        setCurrentUser({ error: "not_found", lineId: lineProfile.userId, displayName: lineProfile.displayName });
+                    }
+                    setIsAuthChecking(false);
+                } else if (lineProfile && employees.length === 0 && !isDataLoading) {
+                     setCurrentUser({ error: "not_found", lineId: lineProfile.userId, displayName: lineProfile.displayName });
+                     setIsAuthChecking(false);
+                }
+            }, [lineProfile, employees, isDataLoading]);
+
+            const fetchLatestData = async () => {
+                setIsDataLoading(true);
+                try {
+                    const data = await callApi("getInitialData");
+                    if (data && !data.error) {
+                        setEmployees(data.employees || []);
+                        setLeaveRequests(data.leaveRequests?.filter(r => r.leaveType !== '補打卡') || []);
+                        setMakeupRequests(data.leaveRequests?.filter(r => r.leaveType === '補打卡') || []);
+                        setAttendanceRecords(data.attendance || []);
+                        localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(data.employees || []));
+                        localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(data.attendance || []));
+                    }
+                } catch (error) { console.error("Fetch failed", error); } finally { setIsDataLoading(false); }
+            };
+
+            const showAlert = (title, message, type = 'alert') => setModal({ isOpen: true, type, title, message });
+            const showConfirm = (title, message, onConfirm) => setModal({ isOpen: true, type: 'confirm', title, message, onConfirm });
+            const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
+
+            const todayRecord = useMemo(() => {
+                if (!currentUser || currentUser.error) return null;
+                const today = getTodayString();
+                return attendanceRecords.find(r => {
+                    const rDate = typeof r.date === 'string' ? r.date.substring(0, 10) : '';
+                    return r.employeeId === currentUser.id && rDate === today;
+                }) || null;
+            }, [currentUser, attendanceRecords]);
+
+            const calculateUsedAnnualLeave = useMemo(() => {
+                if (!currentUser || currentUser.error) return 0;
+                return leaveRequests.filter(r => r.applicantId === currentUser.id && r.leaveType === '特休' && r.status !== '不通過' && r.status !== '已取消')
+                    .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
+            }, [currentUser, leaveRequests]);
+
+            const visibleRequests = useMemo(() => {
+                if (!currentUser || currentUser.error) return [];
+                let allRequests = [...leaveRequests, ...makeupRequests];
+                allRequests.sort((a, b) => new Date(b.applyTime).getTime() - new Date(a.applyTime).getTime());
+                const isAdminOrApprover = currentUser.role === '管理者' || currentUser.role === '簽核者';
+                if (!isAdminOrApprover) {
+                    allRequests = allRequests.filter(r => r.applicantId === currentUser.id || r.deputyId === currentUser.id);
+                }
+                return allRequests;
+            }, [currentUser, leaveRequests, makeupRequests]);
+
+            const handleLineLogin = () => { 
+                if (!MY_LIFF_ID) {
+                    showAlert("系統提示", "尚未設定 MY_LIFF_ID，無法執行登入。", "error");
+                    return;
+                }
+                const currentUrl = window.location.href.split('?')[0]; 
+                liff.login({ redirectUri: currentUrl });
+            };
+
+            const handleLogout = () => { 
+                if (liff.isLoggedIn()) liff.logout(); 
+                window.location.reload();
+            };
+
+            const handleCheckIn = async () => {
+                if (!currentUser) return;
+                if (todayRecord && todayRecord.checkInTime) { showAlert('重複打卡', '今天已經上班打卡了', 'alert'); return; }
+                const nowTime = getNowTimeString();
+                const newRecord = { recordId: `ATT-${Date.now()}`, employeeId: currentUser.id, date: getTodayString(), checkInTime: nowTime, checkOutTime: '' };
+                const newRecords = [...attendanceRecords, newRecord];
+                setAttendanceRecords(newRecords);
+                localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(newRecords));
+                await callApi("clockInOrOut", newRecord);
+                showAlert('打卡成功', `上班時間：${nowTime}`, 'success');
+            };
+
+            const handleCheckOut = () => {
+                if (!currentUser || !todayRecord) { showAlert('錯誤', '請先上班打卡', 'error'); return; }
+                const nowTime = getNowTimeString();
+                const doCheckOut = async () => {
+                    const updatedRecords = attendanceRecords.map(r => r.recordId === todayRecord.recordId ? { ...r, checkOutTime: nowTime } : r);
+                    setAttendanceRecords(updatedRecords);
+                    localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(updatedRecords));
+                    await callApi("clockInOrOut", { employeeId: currentUser.id, date: getTodayString(), checkOutTime: nowTime });
+                    showAlert('打卡成功', `下班時間：${nowTime}`, 'success');
+                };
+                if (todayRecord.checkOutTime) showConfirm('確認', `已有下班紀錄 (${todayRecord.checkOutTime})，要更新為 ${nowTime} 嗎？`, () => { doCheckOut(); closeModal(); });
+                else doCheckOut();
+            };
+
+            const handleSubmitLeave = async (e) => {
+                e.preventDefault();
+                if (!currentUser) return;
+                if (new Date(leaveForm.startDate) > new Date(leaveForm.endDate)) { showAlert('錯誤', '結束日期不能早於開始日期', 'error'); return; }
+                let deputyInfo = { deputyId: '', deputyName: '', deputyStatus: 'none' };
+                if (leaveForm.deputyId) {
+                    const deputy = employees.find(e => e.id === leaveForm.deputyId);
+                    if (deputy) deputyInfo = { deputyId: deputy.id, deputyName: deputy.name, deputyStatus: 'pending' };
+                }
+                const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }), ...deputyInfo };
+                setLeaveRequests([newRequest, ...leaveRequests]); setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
+                showAlert('成功', '假單已送出', 'success'); await callApi("addRequest", newRequest);
+            };
+
+            const handleSubmitMakeup = async (e) => {
+                e.preventDefault();
+                const newRequest = { type: 'makeup', requestId: `MK-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, targetDate: makeupForm.targetDate, targetTime: makeupForm.targetTime, makeupType: makeupForm.makeupType, reason: makeupForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }) };
+                setMakeupRequests([newRequest, ...makeupRequests]); setIsMakeupModalOpen(false); setMakeupForm({ ...makeupForm, reason: '' });
+                showAlert('成功', '補打卡申請已送出', 'success'); await callApi("addRequest", newRequest);
+            };
+
+            // 🟢 新增：送出編輯過的單據
+            const handleSubmitEditRequest = async (e) => {
+                e.preventDefault();
+                if (!currentUser || !editingRequest) return;
+                if (editingRequest.type === 'leave' && new Date(editingRequest.startDate) > new Date(editingRequest.endDate)) { 
+                    showAlert('錯誤', '結束日期不能早於開始日期', 'error'); return; 
+                }
+
+                let updatedReq = { ...editingRequest };
+                
+                // 如果是請假單且修改了代理人，需要重置代理人狀態
+                if (updatedReq.type === 'leave') {
+                    if (updatedReq.deputyId) {
+                        const deputy = employees.find(emp => emp.id === updatedReq.deputyId);
+                        if (deputy) {
+                            updatedReq.deputyName = deputy.name;
+                            updatedReq.deputyStatus = 'pending'; // 只要有代理人，儲存後強制重新發送審核
+                        }
+                    } else {
+                        updatedReq.deputyName = '';
+                        updatedReq.deputyStatus = 'none';
+                    }
+                }
+
+                // 更新前端畫面
+                if (updatedReq.type === 'leave') {
+                    setLeaveRequests(prev => prev.map(r => r.requestId === updatedReq.requestId ? updatedReq : r));
+                } else {
+                    setMakeupRequests(prev => prev.map(r => r.requestId === updatedReq.requestId ? updatedReq : r));
+                }
+
+                setEditingRequest(null);
+                showAlert('成功', '單據已更新並重新送出', 'success');
+                
+                // 呼叫 API 更新後端
+                await callApi("editRequest", updatedReq);
+            };
+
+            const handleApproval = async (req, isApproved) => {
+                const status = isApproved ? '通過' : '不通過';
+                const now = new Date().toLocaleString('zh-TW', { hour12: false });
+                const approvalData = { status, approverName: currentUser.name, approvalTime: now };
+                if (req.type === 'leave') setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
+                else {
+                    setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
+                    if (isApproved) {
+                         setAttendanceRecords(prev => {
+                            const existingIndex = prev.findIndex(rec => rec.employeeId === req.applicantId && rec.date === req.targetDate);
+                            if (existingIndex >= 0) {
+                                const updated = [...prev];
+                                if (req.makeupType === '上班') updated[existingIndex].checkInTime = req.targetTime + ':00';
+                                else updated[existingIndex].checkOutTime = req.targetTime + ':00';
+                                localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(updated));
+                                return updated;
+                            } else {
+                                const newRecord = { recordId: `ATT-MK-${Date.now()}`, employeeId: req.applicantId, date: req.targetDate, checkInTime: req.makeupType === '上班' ? req.targetTime + ':00' : null, checkOutTime: req.makeupType === '下班' ? req.targetTime + ':00' : null };
+                                const newRecords = [...prev, newRecord];
+                                localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(newRecords));
+                                return newRecords;
+                            }
+                        });
+                    }
+                }
+                await callApi("updateRequestStatus", { requestId: req.requestId, ...approvalData });
+            };
+
+            const handleCancelRequest = (req) => {
+                showConfirm('確認取消', '確定要取消此申請嗎？', async () => {
+                    const now = new Date().toLocaleString('zh-TW', { hour12: false });
+                    const updateData = { status: '已取消', approverName: currentUser?.name, approvalTime: now };
+                    if (req.type === 'leave') setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...updateData } : r));
+                    else setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...updateData } : r));
+                    closeModal(); await callApi("updateRequestStatus", { requestId: req.requestId, ...updateData });
+                });
+            };
+
+            // 處理代理人同意/拒絕的操作
+            const handleDeputyAction = async (requestId, isAgreed) => {
+                const status = isAgreed ? 'agreed' : 'rejected';
+                setLeaveRequests(prev => prev.map(req => req.requestId === requestId ? { ...req, deputyStatus: status } : req));
+                showAlert('已回覆', `您已${isAgreed ? '同意' : '拒絕'}代理`, isAgreed ? 'success' : 'alert');
+                await callApi("updateRequestStatus", { requestId, deputyStatus: status });
+            };
+
+            const handleSaveEmployee = async (e) => {
+                e.preventDefault();
+                const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0 };
+                const updatedList = empForm.isEdit ? employees.map(emp => emp.id === empForm.id ? newEmployee : emp) : [...employees, newEmployee];
+                setEmployees(updatedList);
+                localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(updatedList));
+                setIsEditEmpModalOpen(false);
+                showAlert('成功', empForm.isEdit ? `已更新員工：${newEmployee.name}` : `已新增員工：${newEmployee.name}`, 'success'); 
+                await callApi("saveEmployee", newEmployee);
+            };
+
+            if (isAuthChecking) return (<div className="initial-loader-container"><div className="loader"></div><p style={{marginTop:'15px',color:'#6b7280',fontWeight:'bold'}}>檢查身分中...</p></div>);
+            
+            if (!currentUser || currentUser.error) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                        <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
+                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center border-t-4 border-[#06C755]">
+                            <div className="flex justify-center mb-6"><CompanyLogo size="large" /></div>
+                            
+                            {currentUser?.error === "not_found" ? (
+                                <div className="space-y-4 text-left">
+                                    <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200">
+                                        <h2 className="font-bold text-lg mb-1 flex items-center"><AlertCircle className="w-5 h-5 mr-1" /> 尚未綁定系統</h2>
+                                        <p className="text-sm">您已成功登入 LINE，但尚未被加入員工名單中。</p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded-xl">
+                                        <p className="text-sm text-gray-800 mb-2 font-bold">⚠️ 注意：這不是您平常加好友的 LINE ID</p>
+                                        <p className="text-xs text-gray-600 mb-3 leading-relaxed">這是系統為您產生的專屬「開發者 User ID」，特徵是永遠為 <strong className="text-[#06C755]">U 開頭的 33 碼字串</strong>。</p>
+                                        <p className="text-xs text-gray-500 mb-2">請點擊下方代碼複製，並交給管理員更新您的資料：</p>
+                                        <div className="flex bg-white border border-gray-200 shadow-inner rounded-lg p-3 items-center justify-center">
+                                            <code className="text-xs break-all text-[#06C755] font-bold select-all cursor-text">{currentUser.lineId}</code>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleLogout} className="w-full text-gray-500 text-sm mt-4 underline">切換其他 LINE 帳號 / 重新載入</button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <h1 className="text-xl font-bold mb-4 text-gray-800">系統登入</h1>
+                                    <p className="text-sm text-gray-600 mb-5">請點擊下方按鈕授權登入出勤系統</p>
+                                    
+                                    <button onClick={handleLineLogin} className="w-full bg-[#06C755] text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-green-600 flex items-center justify-center transition-colors">
+                                        <svg className="w-6 h-6 mr-2" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M24 10.304c0-4.364-4.505-7.896-10.038-7.896C8.428 2.408 3.93 5.94 3.93 10.304c0 3.863 3.513 7.151 8.356 7.799.324.07.766.216.88.514.1.265.064.676.03.88l-.133.801c-.04.226-.188.948.835.514 1.024-.434 5.532-3.268 7.51-5.56.126-.145.228-.276.321-.403a6.76 6.76 0 0 0 2.271-4.545zM8.36 12.02H6.551a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.808c.19 0 .346.155.346.347 0 .19-.155.346-.346.346H6.898v1h1.462c.19 0 .346.156.346.347 0 .19-.155.346-.346.346H6.898v1.282h1.462c.19 0 .346.156.346.346 0 .192-.155.347-.346.347zm4.27-.346c0 .192-.155.347-.346.347H10.58a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h1.704c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.358v2.627h1.358c.19 0 .346.156.346.346zm2.348.346a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347c.19 0 .346.155.346.347v3.32c0 .192-.155.347-.346.347zm5.52-.346c0 .192-.155.347-.346.347h-2.181a.347.347 0 0 1-.347-.346v-3.32a.347.347 0 0 1 .347-.347h2.181c.19 0 .346.155.346.347 0 .19-.155.346-.346.346h-1.835v.982h1.835c.19 0 .346.156.346.347 0 .19-.155.346-.346.346h-1.835v1.298h1.835c.19 0 .346.156.346.346z"/></svg>
+                                        LINE 快速登入
+                                    </button>
+
+                                    <div className="mt-6 text-xs text-gray-500 bg-green-50 p-4 rounded-xl border border-green-100 text-left">
+                                        <p className="font-bold mb-1 text-green-800">💡 系統說明：</p>
+                                        <p className="leading-relaxed">點擊上方按鈕後，<strong className="text-green-700">系統將調用 LIFF 授權登入</strong>，完成後會自動導回系統並載入資料。</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            // 日曆渲染邏輯
+            const renderCalendar = () => {
+                const year = currentMonth.getFullYear();
+                const month = currentMonth.getMonth();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const firstDay = new Date(year, month, 1).getDay();
+                const days = [];
+
+                let calRequests = visibleRequests;
+                let calAttendance = attendanceRecords;
+
+                if (isManagementRole(currentUser.role) && calendarUserFilter !== 'all') {
+                    calRequests = calRequests.filter(r => r.applicantId === calendarUserFilter);
+                    calAttendance = calAttendance.filter(r => r.employeeId === calendarUserFilter);
+                }
+
+                for (let i = 0; i < firstDay; i++) {
+                    days.push(<div key={`empty-${i}`} className="min-h-[80px] p-2 bg-gray-50/50 border border-gray-100"></div>);
+                }
+
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const dayAtt = calAttendance.filter(a => (typeof a.date === 'string' ? a.date.substring(0,10) : '') === dateStr);
+                    const dayReq = calRequests.filter(r => {
+                        if (r.type === 'makeup') return r.targetDate === dateStr;
+                        if (r.type === 'leave') return dateStr >= r.startDate && dateStr <= r.endDate;
+                        return false;
+                    });
+
+                    days.push(
+                        <div key={d} className="min-h-[80px] p-2 bg-white border border-gray-100 flex flex-col gap-1">
+                            <div className={`text-xs font-bold ${dateStr === getTodayString() ? 'bg-emerald-500 text-white w-5 h-5 flex items-center justify-center rounded-full shadow-sm' : 'text-gray-500'}`}>{d}</div>
+                            <div className="flex-1 overflow-y-auto space-y-1 mt-1 scrollbar-hide">
+                                {dayAtt.map((att, idx) => (
+                                    <div key={`att-${idx}`} className="text-[10px] leading-tight text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 truncate shadow-sm">
+                                        {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
+                                        {att.checkInTime ? `入${att.checkInTime.substring(0,5)}` : ''} {att.checkOutTime ? `出${att.checkOutTime.substring(0,5)}` : ''}
+                                    </div>
+                                ))}
+                                {dayReq.map((req, idx) => (
+                                    <div key={`req-${idx}`} className={`text-[10px] leading-tight px-1 py-0.5 rounded border truncate shadow-sm ${req.status === '通過' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
+                                        {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{req.applicantName}: </span>}
+                                        {req.leaveType || req.makeupType} ({req.status})
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                }
+
+                return (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in">
+                        <div className="p-3 flex justify-between items-center border-b border-gray-100 bg-gray-50">
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronLeft className="w-4 h-4 text-gray-600"/></button>
+                                <span className="font-bold text-gray-700">{year}年 {month + 1}月</span>
+                                <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronRight className="w-4 h-4 text-gray-600"/></button>
+                            </div>
+                            {isManagementRole(currentUser.role) && (
+                                <select className="text-xs font-bold border border-gray-200 rounded-lg p-1.5 bg-white text-gray-700 shadow-sm outline-none" value={calendarUserFilter} onChange={(e) => setCalendarUserFilter(e.target.value)}>
+                                    <option value="all">顯示所有人</option>
+                                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                                </select>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-7 text-center text-xs font-bold text-gray-500 bg-white border-b border-gray-100">
+                            <div className="py-2 text-red-400">日</div><div className="py-2">一</div><div className="py-2">二</div><div className="py-2">三</div><div className="py-2">四</div><div className="py-2">五</div><div className="py-2 text-red-400">六</div>
+                        </div>
+                        <div className="grid grid-cols-7 auto-rows-fr">
+                            {days}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 pb-20 relative">
+                    <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
+                    <MakeupRequestModal isOpen={isMakeupModalOpen} onClose={()=>setIsMakeupModalOpen(false)} onSubmit={handleSubmitMakeup} form={makeupForm} setForm={setMakeupForm}/>
+                    <EditEmployeeModal isOpen={isEditEmpModalOpen} onClose={()=>setIsEditEmpModalOpen(false)} onSubmit={handleSaveEmployee} employee={empForm} setEmployee={setEmpForm}/>
+                    <EditRequestModal isOpen={!!editingRequest} onClose={()=>setEditingRequest(null)} onSubmit={handleSubmitEditRequest} reqData={editingRequest} setReqData={setEditingRequest} employees={employees} currentUser={currentUser} />
+
+                    <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-30">
+                        <div className="max-w-6xl mx-auto px-4 h-16 flex justify-between items-center">
+                            <CompanyLogo />
+                            <div className="flex items-center space-x-4">
+                                <div className="text-right text-sm hidden md:block"><div className="font-bold">{currentUser.name}</div><div className="text-gray-500">{currentUser.role}</div></div>
+                                {currentUser.photoURL && <img src={currentUser.photoURL} className="w-8 h-8 rounded-full border border-gray-200" alt="avatar" />}
+                                <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"><LogOut className="w-5 h-5"/></button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <div className="max-w-6xl mx-auto px-4 py-8">
+                        <div className="bg-[#06C755] rounded-2xl p-6 mb-8 text-white relative shadow-md overflow-hidden flex justify-between items-center">
+                            <div className="relative z-10">
+                                <h2 className="text-2xl font-bold mb-1">早安，{currentUser.name}</h2>
+                                <p className="text-green-100 text-sm mb-3">今天也要加油喔！</p>
+                                {isDataLoading && <div className="inline-flex items-center bg-white/20 px-3 py-1 rounded text-xs animate-pulse-subtle"><RefreshCw className="w-3 h-3 mr-2 animate-spin"/>資料同步中...</div>}
+                            </div>
+                            <div className="bg-green-600 px-4 py-2 rounded-lg border border-green-500 text-center"><div className="text-xs text-green-100">特休餘額</div><div className="text-xl font-bold">{currentUser.annualLeaveQuota - calculateUsedAnnualLeave} <span className="text-sm">天</span></div></div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                            <div className="lg:col-span-4 space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden">
+                                    <div className="bg-emerald-600 px-5 py-3 flex items-center text-white font-bold"><Timer className="w-5 h-5 mr-2"/>每日打卡</div>
+                                    <div className="p-5">
+                                        <div className="flex gap-3 mb-4">
+                                            <button onClick={handleCheckIn} disabled={!!todayRecord?.checkInTime} className={`flex-1 flex flex-col items-center p-3 rounded-xl border-2 ${todayRecord?.checkInTime ? 'bg-gray-50 border-gray-100 text-gray-400' : 'bg-white border-emerald-100 text-emerald-600 hover:bg-emerald-50'}`}><PlayCircle className="w-8 h-8 mb-1"/>上班</button>
+                                            <button onClick={handleCheckOut} disabled={!todayRecord?.checkInTime} className={`flex-1 flex flex-col items-center p-3 rounded-xl border-2 ${!todayRecord?.checkInTime ? 'bg-gray-50 border-gray-100 text-gray-400' : 'bg-white border-orange-100 text-orange-600 hover:bg-orange-50'}`}><StopCircle className="w-8 h-8 mb-1"/>下班</button>
+                                        </div>
+                                        <div className="bg-gray-50 p-3 rounded text-sm space-y-1">
+                                            <div className="flex justify-between"><span className="text-gray-500">上班</span><span className="font-mono font-bold text-emerald-600">{todayRecord?.checkInTime || '--:--'}</span></div>
+                                            <div className="flex justify-between"><span className="text-gray-500">下班</span><span className="font-mono font-bold text-orange-600">{todayRecord?.checkOutTime || '--:--'}</span></div>
+                                        </div>
+                                        <button onClick={()=>setIsMakeupModalOpen(true)} className="w-full mt-3 text-sm text-emerald-600 underline text-center">忘記打卡？申請補登</button>
+                                    </div>
+                                </div>
+
+                                <div className="flex bg-white p-1 rounded-xl shadow-sm border">
+                                    <button onClick={()=>setActiveTab('apply')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='apply'?'bg-emerald-50 text-emerald-600':'text-gray-400'}`}>假單</button>
+                                    {isManagementRole(currentUser.role) && <button onClick={()=>setActiveTab('admin')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='admin'?'bg-orange-50 text-orange-600':'text-gray-400'}`}>管理</button>}
+                                </div>
+
+                                {activeTab === 'apply' && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                                        <h3 className="font-bold text-gray-700 mb-4 flex items-center"><FileText className="w-4 h-4 mr-2"/>填寫假單</h3>
+                                        <form onSubmit={handleSubmitLeave} className="space-y-4">
+                                            <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm" value={leaveForm.leaveType} onChange={e=>setLeaveForm({...leaveForm,leaveType:e.target.value})}><option>特休</option><option>事假</option><option>病假</option><option>公假</option></select><select className="flex-1 border rounded p-2 text-sm" value={leaveForm.deputyId} onChange={e=>setLeaveForm({...leaveForm,deputyId:e.target.value})}><option value="">無代理</option>{employees.filter(e=>e.id!==currentUser.id).map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></div>
+                                            <div className="text-xs text-gray-500 font-bold">期間</div>
+                                            <div className="flex gap-1"><input type="date" required className="flex-1 border rounded p-1 text-sm" value={leaveForm.startDate} onChange={e=>setLeaveForm({...leaveForm,startDate:e.target.value})}/><select className="w-16 border rounded text-sm" value={leaveForm.startSession} onChange={e=>setLeaveForm({...leaveForm,startSession:e.target.value})}><option>上午</option><option>下午</option></select></div>
+                                            <div className="flex gap-1"><input type="date" required className="flex-1 border rounded p-1 text-sm" value={leaveForm.endDate} onChange={e=>setLeaveForm({...leaveForm,endDate:e.target.value})}/><select className="w-16 border rounded text-sm" value={leaveForm.endSession} onChange={e=>setLeaveForm({...leaveForm,endSession:e.target.value})}><option>上午</option><option>下午</option></select></div>
+                                            <textarea required rows={2} className="w-full border rounded p-2 text-sm" placeholder="事由..." value={leaveForm.reason} onChange={e=>setLeaveForm({...leaveForm,reason:e.target.value})}/>
+                                            <button type="submit" className="w-full bg-[#06C755] text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-green-600">送出申請</button>
+                                        </form>
+                                    </div>
+                                )}
+                                {activeTab === 'admin' && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
+                                        <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
+                                        <form onSubmit={handleSaveEmployee} className="space-y-3">
+                                            <input type="text" required placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
+                                            <input type="text" required placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
+                                            <input type="text" required placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
+                                            <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
+                                            <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md">新增</button>
+                                        </form>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="lg:col-span-8">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg text-gray-700">
+                                        {activeTab === 'admin' ? '員工列表' : (viewMode === 'calendar' ? '出勤與請假日曆' : '近期紀錄')}
+                                    </h3>
+                                    {activeTab !== 'admin' && (
+                                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                                            <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center ${viewMode === 'list' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}><List className="w-3.5 h-3.5 mr-1"/>列表</button>
+                                            <button onClick={() => setViewMode('calendar')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center ${viewMode === 'calendar' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}><CalendarIcon className="w-3.5 h-3.5 mr-1"/>日曆</button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {activeTab === 'admin' ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {employees.map(emp => (
+                                            <div key={emp.id} className="bg-white p-4 rounded-xl border border-gray-100 flex items-center shadow-sm relative group">
+                                                <button onClick={() => { setEmpForm({...emp, isEdit:true}); setIsEditEmpModalOpen(true); }} className="absolute top-2 right-2 p-1 text-gray-400 hover:text-orange-600"><Edit className="w-4 h-4" /></button>
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${emp.avatarColor || 'bg-gray-400'}`}>{emp.name[0]}</div>
+                                                <div className="ml-3"><div className="font-bold text-sm">{emp.name} <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1 rounded ml-1">{emp.role}</span></div><div className="text-[10px] text-[#06C755] font-mono mt-0.5 w-32 truncate">{emp.lineId}</div><div className="text-xs text-gray-500 mt-0.5">特休: {emp.annualLeaveQuota}</div></div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    viewMode === 'calendar' ? renderCalendar() : (
+                                    <div className="space-y-3">
+                                        {visibleRequests.length === 0 ? <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed">無近期紀錄</div> : visibleRequests.map(req => {
+                                            const deputyEmp = req.deputyId ? employees.find(e => e.id === req.deputyId) : null;
+                                            const deputyName = deputyEmp ? deputyEmp.name : req.deputyName;
+                                            
+                                            return (
+                                            <div key={req.requestId} className="bg-white p-4 rounded-xl border shadow-sm relative">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="font-bold text-sm">{req.applicantName}</div>
+                                                        <div className="text-xs text-gray-400">{req.applyTime.split(' ')[0]}</div>
+                                                    </div>
+                                                    <div className={`text-xs font-bold px-2 py-0.5 rounded ${getStatusColor(req.status)} flex items-center`}>{getStatusIcon(req.status)}{req.status}</div>
+                                                </div>
+                                                <div className="text-sm pl-3 border-l-2 border-gray-100 space-y-1.5">
+                                                    <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">{req.type==='leave'?'假別':'補登'}</span><span className="text-gray-800 font-bold">{req.leaveType || req.makeupType}</span></div>
+                                                    <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">時間</span><span className="text-gray-700 text-xs">{req.type==='leave' ? `${req.startDate} ~ ${req.endDate}` : `${req.targetDate} ${req.targetTime}`}</span></div>
+                                                    <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">事由</span><span className="text-gray-600 break-all">{req.reason}</span></div>
+                                                    
+                                                    {req.deputyId && (
+                                                        <div className="flex items-start mt-1">
+                                                            <span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">代理人</span>
+                                                            <span className="text-xs flex items-center text-gray-700 font-bold">
+                                                                {deputyName}
+                                                                {req.deputyStatus === 'pending' && <span className="ml-2 text-[10px] text-orange-600 bg-orange-50 border border-orange-100 px-1.5 py-0.5 rounded-sm">待確認</span>}
+                                                                {req.deputyStatus === 'agreed' && <span className="ml-2 text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-sm">已同意</span>}
+                                                                {req.deputyStatus === 'rejected' && <span className="ml-2 text-[10px] text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-sm">已拒絕</span>}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex justify-end mt-3 gap-2">
+                                                    {req.deputyId === currentUser.id && req.deputyStatus === 'pending' && req.status === '待簽核' && (
+                                                        <div className="flex gap-2 mr-auto">
+                                                            <button onClick={() => handleDeputyAction(req.requestId, false)} className="text-xs bg-gray-50 text-gray-600 px-3 py-1.5 rounded-lg font-bold hover:bg-gray-100 border border-gray-200 transition-colors shadow-sm">拒絕代理</button>
+                                                            <button onClick={() => handleDeputyAction(req.requestId, true)} className="text-xs bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg font-bold hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm">同意代理</button>
+                                                        </div>
+                                                    )}
+                                                    {currentUser.id === req.applicantId && req.status === '待簽核' && (
+                                                        <div className="flex gap-2">
+                                                            <button onClick={()=>setEditingRequest({...req})} className="text-xs text-blue-500 underline hover:text-blue-700 font-bold">編輯</button>
+                                                            <button onClick={()=>handleCancelRequest(req)} className="text-xs text-gray-400 underline hover:text-red-500">取消</button>
+                                                        </div>
+                                                    )}
+                                                    {currentUser.role === '簽核者' && req.status === '待簽核' && <><button onClick={()=>handleApproval(req,false)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100">不通過</button><button onClick={()=>handleApproval(req,true)} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded border border-green-100">通過</button></>}
+                                                </div>
+                                            </div>
+                                        )})}
+                                    </div>
+                                    )
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<LeaveApp />);
+    </script>
+</body>
+</html>
