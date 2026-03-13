@@ -41,17 +41,18 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
         import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning } from 'https://esm.sh/lucide-react@0.263.1';
+        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette } from 'https://esm.sh/lucide-react@0.263.1';
 
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_5';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_5';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_6';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_6';
         
         // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
         
         const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
+        const BANNER_COLORS = ['bg-[#06C755]', 'bg-blue-600', 'bg-indigo-600', 'bg-violet-600', 'bg-rose-600', 'bg-orange-600', 'bg-slate-800'];
 
         const callApi = async (action, payload = {}) => {
             try {
@@ -163,7 +164,56 @@
             )
         };
 
-        // 🟢 B需求：編輯單據的 Modal
+        const CalendarDayModal = ({ isOpen, onClose, data, employees }) => {
+            if (!isOpen || !data) return null;
+            return (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden flex flex-col max-h-[80vh]">
+                        <div className="bg-emerald-600 px-6 py-4 border-b border-emerald-500 flex items-center justify-between shrink-0">
+                            <h3 className="font-bold text-white">{data.date} 紀錄明細</h3>
+                            <button onClick={onClose} className="text-emerald-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-6 space-y-4 overflow-y-auto">
+                            {data.attendance.length === 0 && data.requests.length === 0 && <div className="text-center text-gray-400 py-4 border border-dashed rounded-lg">當日無紀錄</div>}
+                            
+                            {data.attendance.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-gray-700 mb-2 border-b pb-1">📍 打卡紀錄</h4>
+                                    {data.attendance.map((att, idx) => (
+                                        <div key={idx} className="mb-2 text-sm bg-emerald-50 p-3 rounded-lg border border-emerald-100 shadow-sm">
+                                            <div className="font-bold text-emerald-800 mb-1">{employees.find(e=>e.id===att.employeeId)?.name}</div>
+                                            <div className="text-emerald-700 flex justify-between font-mono">
+                                                <span>上班: {att.checkInTime || '--:--'}</span>
+                                                <span>下班: {att.checkOutTime || '--:--'}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {data.requests.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-gray-700 mb-2 border-b pb-1">📄 單據紀錄</h4>
+                                    {data.requests.map((req, idx) => (
+                                        <div key={idx} className={`mb-2 text-sm p-3 rounded-lg border shadow-sm ${req.type === 'leave' ? 'bg-blue-50 border-blue-100' : 'bg-orange-50 border-orange-100'}`}>
+                                            <div className={`font-bold mb-1 ${req.type === 'leave' ? 'text-blue-800' : 'text-orange-800'}`}>
+                                                {req.applicantName} - {req.type === 'leave' ? req.leaveType : `補打卡 (${req.makeupType})`}
+                                            </div>
+                                            <div className={`text-xs space-y-1 ${req.type === 'leave' ? 'text-blue-700' : 'text-orange-700'}`}>
+                                                <div className="font-mono">時間: {req.type === 'leave' ? `${req.startDate} ${req.startSession} ~ ${req.endDate} ${req.endSession}` : `${req.targetTime}`}</div>
+                                                <div>事由: {req.reason}</div>
+                                                <div>狀態: <span className="font-bold">{req.status}</span></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         const EditRequestModal = ({ isOpen, onClose, onSubmit, reqData, setReqData, employees, currentUser }) => {
             if (!isOpen || !reqData) return null;
             const isLeave = reqData.type === 'leave';
@@ -234,10 +284,10 @@
                     <div className="flex items-center"><Settings className="w-5 h-5 text-orange-600 mr-2" /><h3 className="font-bold text-orange-800">編輯員工資料</h3></div>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
                   </div>
-                  <form onSubmit={onSubmit} className="p-6 space-y-4">
+                  <form onSubmit={onSubmit} className="p-6 space-y-4" autoComplete="off">
                     <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-500 mb-4 flex items-center"><Info className="w-4 h-4 mr-2" />員工 ID ({employee.id}) 無法修改</div>
-                    <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
-                    <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required autoComplete="new-password" className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
+                    <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required autoComplete="new-password" placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
                     <div className="grid grid-cols-2 gap-4">
                       <div><label className="block text-sm font-bold text-gray-700 mb-1">系統權限</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={employee.role} onChange={(e) => setEmployee({...employee, role: e.target.value})}><option value="申請者">申請者</option><option value="簽核者">簽核者</option><option value="管理者">管理者</option></select></div>
                       <div><label className="block text-sm font-bold text-gray-700 mb-1">特休額度</label><input type="number" step="0.5" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.annualLeaveQuota} onChange={(e) => setEmployee({...employee, annualLeaveQuota: parseFloat(e.target.value)})}/></div>
@@ -280,13 +330,19 @@
             const [makeupForm, setMakeupForm] = useState({ targetDate: getTodayString(), targetTime: '09:00', makeupType: '上班', reason: '' });
             const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
 
-            // 🟢 A與B需求：新增視圖模式與編輯狀態
             const [viewMode, setViewMode] = useState('list'); 
             const [currentMonth, setCurrentMonth] = useState(new Date());
             const [calendarUserFilter, setCalendarUserFilter] = useState('all');
             const [editingRequest, setEditingRequest] = useState(null);
+            const [selectedDateDetails, setSelectedDateDetails] = useState(null); 
 
-            // 🟢 核心修正：保留完整的 LIFF 初始化，確保系統不卡死
+            // 🟢 新增：橫幅顏色偏好狀態
+            const [bannerColor, setBannerColor] = useState('bg-[#06C755]');
+            const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+
+            // 🟢 新增：Excel 匯出日期區間
+            const [exportDates, setExportDates] = useState({ start: getTodayString(), end: getTodayString() });
+
             useEffect(() => {
                 let isMounted = true;
                 fetchLatestData(); 
@@ -321,6 +377,9 @@
                     const target = employees.find(e => e.lineId === lineProfile.userId);
                     if (target) {
                         setCurrentUser({ ...target, photoURL: lineProfile.pictureUrl });
+                        // 🟢 載入使用者專屬的橫幅顏色
+                        const savedColor = localStorage.getItem(`bannerColor_${target.id}`);
+                        if (savedColor) setBannerColor(savedColor);
                     } else {
                         setCurrentUser({ error: "not_found", lineId: lineProfile.userId, displayName: lineProfile.displayName });
                     }
@@ -337,8 +396,8 @@
                     const data = await callApi("getInitialData");
                     if (data && !data.error) {
                         setEmployees(data.employees || []);
-                        setLeaveRequests(data.leaveRequests?.filter(r => r.leaveType !== '補打卡') || []);
-                        setMakeupRequests(data.leaveRequests?.filter(r => r.leaveType === '補打卡') || []);
+                        setLeaveRequests(data.leaveRequests?.filter(r => r.leaveType !== '補打卡').map(r => ({...r, type: 'leave'})) || []);
+                        setMakeupRequests(data.leaveRequests?.filter(r => r.leaveType === '補打卡').map(r => ({...r, type: 'makeup'})) || []);
                         setAttendanceRecords(data.attendance || []);
                         localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(data.employees || []));
                         localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(data.attendance || []));
@@ -359,9 +418,17 @@
                 }) || null;
             }, [currentUser, attendanceRecords]);
 
+            // 🟢 新增：特休使用量統計
             const calculateUsedAnnualLeave = useMemo(() => {
                 if (!currentUser || currentUser.error) return 0;
                 return leaveRequests.filter(r => r.applicantId === currentUser.id && r.leaveType === '特休' && r.status !== '不通過' && r.status !== '已取消')
+                    .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
+            }, [currentUser, leaveRequests]);
+
+            // 🟢 新增：所有假別總用量統計
+            const calculateTotalLeave = useMemo(() => {
+                if (!currentUser || currentUser.error) return 0;
+                return leaveRequests.filter(r => r.applicantId === currentUser.id && r.status !== '不通過' && r.status !== '已取消')
                     .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
             }, [currentUser, leaveRequests]);
 
@@ -375,6 +442,78 @@
                 }
                 return allRequests;
             }, [currentUser, leaveRequests, makeupRequests]);
+
+            // 🟢 新增：待審核代理申請數量
+            const pendingDeputyRequests = useMemo(() => {
+                if (!currentUser || currentUser.error) return [];
+                return leaveRequests.filter(r => r.deputyId === currentUser.id && r.deputyStatus === 'pending' && r.status === '待簽核');
+            }, [currentUser, leaveRequests]);
+
+            const handleBannerColorChange = (color) => {
+                setBannerColor(color);
+                setIsColorPickerOpen(false);
+                if(currentUser) localStorage.setItem(`bannerColor_${currentUser.id}`, color);
+            };
+
+            const handleTabChange = (tab) => {
+                setActiveTab(tab);
+                // 🟢 阻擋自動填寫：切換至管理分籤時，強制重置表單
+                if(tab === 'admin') {
+                    setEmpForm({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
+                }
+            };
+
+            // 🟢 新增：Excel 匯出邏輯
+            const handleExportExcel = (type) => {
+                if (!exportDates.start || !exportDates.end) {
+                    showAlert('錯誤', '請選擇完整的起始與結束日期', 'error'); return;
+                }
+                if (exportDates.start > exportDates.end) {
+                    showAlert('錯誤', '起始日期不能大於結束日期', 'error'); return;
+                }
+
+                let dataToExport = [];
+                let filename = '';
+
+                if (type === 'leave') {
+                    const allReq = [...leaveRequests, ...makeupRequests];
+                    const filtered = allReq.filter(r => r.applyTime.substring(0,10) >= exportDates.start && r.applyTime.substring(0,10) <= exportDates.end);
+                    dataToExport = filtered.map(r => ({
+                        '單號': r.requestId,
+                        '申請人': r.applicantName,
+                        '類型': r.type === 'leave' ? `請假 (${r.leaveType})` : `補打卡 (${r.makeupType})`,
+                        '開始時間': r.type === 'leave' ? `${r.startDate} ${r.startSession}` : `${r.targetDate} ${r.targetTime}`,
+                        '結束時間': r.type === 'leave' ? `${r.endDate} ${r.endSession}` : '',
+                        '事由': r.reason,
+                        '狀態': r.status,
+                        '申請時間': r.applyTime,
+                        '代理人': r.deputyName || '無',
+                        '簽核者': r.approverName || ''
+                    }));
+                    filename = `出勤單據紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
+                } else if (type === 'attendance') {
+                    const filtered = attendanceRecords.filter(r => {
+                        const dateStr = typeof r.date === 'string' ? r.date.substring(0, 10) : '';
+                        return dateStr >= exportDates.start && dateStr <= exportDates.end;
+                    });
+                    dataToExport = filtered.map(r => ({
+                        '員工姓名': employees.find(e => e.id === r.employeeId)?.name || r.employeeId,
+                        '打卡日期': typeof r.date === 'string' ? r.date.substring(0, 10) : r.date,
+                        '上班時間': r.checkInTime || '',
+                        '下班時間': r.checkOutTime || ''
+                    }));
+                    filename = `每日打卡紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
+                }
+
+                if (dataToExport.length === 0) {
+                    showAlert('提示', '此區間內沒有任何資料', 'alert'); return;
+                }
+
+                const ws = XLSX.utils.json_to_sheet(dataToExport);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "紀錄清單");
+                XLSX.writeFile(wb, filename);
+            };
 
             const handleLineLogin = () => { 
                 if (!MY_LIFF_ID) {
@@ -437,7 +576,6 @@
                 showAlert('成功', '補打卡申請已送出', 'success'); await callApi("addRequest", newRequest);
             };
 
-            // 🟢 A需求：代理人按下同意或拒絕
             const handleDeputyAction = async (requestId, isAgreed) => {
                 const status = isAgreed ? 'agreed' : 'rejected';
                 setLeaveRequests(prev => prev.map(req => req.requestId === requestId ? { ...req, deputyStatus: status } : req));
@@ -445,7 +583,6 @@
                 await callApi("updateRequestStatus", { requestId, deputyStatus: status });
             };
 
-            // 🟢 B需求：送出編輯後的單據
             const handleSubmitEditRequest = async (e) => {
                 e.preventDefault();
                 if (!currentUser || !editingRequest) return;
@@ -527,7 +664,6 @@
                 await callApi("saveEmployee", newEmployee);
             };
 
-            // 🟢 A需求：日曆渲染邏輯
             const renderCalendar = () => {
                 const year = currentMonth.getFullYear();
                 const month = currentMonth.getMonth();
@@ -550,26 +686,27 @@
                 for (let d = 1; d <= daysInMonth; d++) {
                     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                     const dayAtt = calAttendance.filter(a => (typeof a.date === 'string' ? a.date.substring(0,10) : '') === dateStr);
-                    const dayReq = calRequests.filter(r => {
+                    
+                    const validReq = calRequests.filter(r => {
                         if (r.type === 'makeup') return r.targetDate === dateStr;
-                        if (r.type === 'leave') return dateStr >= r.startDate && dateStr <= r.endDate;
+                        if (r.type === 'leave') return r.status === '通過' && dateStr >= r.startDate && dateStr <= r.endDate;
                         return false;
                     });
 
                     days.push(
-                        <div key={d} className="min-h-[80px] p-2 bg-white border border-gray-100 flex flex-col gap-1">
+                        <div key={d} onClick={() => setSelectedDateDetails({ date: dateStr, attendance: dayAtt, requests: validReq })} className="min-h-[80px] p-2 bg-white border border-gray-100 flex flex-col gap-1 cursor-pointer transition-colors hover:bg-gray-50 active:bg-gray-100">
                             <div className={`text-xs font-bold ${dateStr === getTodayString() ? 'bg-emerald-500 text-white w-5 h-5 flex items-center justify-center rounded-full shadow-sm' : 'text-gray-500'}`}>{d}</div>
-                            <div className="flex-1 overflow-y-auto space-y-1 mt-1 scrollbar-hide">
+                            <div className="flex-1 overflow-y-auto space-y-1 mt-1 scrollbar-hide pointer-events-none">
                                 {dayAtt.map((att, idx) => (
                                     <div key={`att-${idx}`} className="text-[10px] leading-tight text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 truncate shadow-sm">
                                         {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
                                         {att.checkInTime ? `入${att.checkInTime.substring(0,5)}` : ''} {att.checkOutTime ? `出${att.checkOutTime.substring(0,5)}` : ''}
                                     </div>
                                 ))}
-                                {dayReq.map((req, idx) => (
-                                    <div key={`req-${idx}`} className={`text-[10px] leading-tight px-1 py-0.5 rounded border truncate shadow-sm ${req.status === '通過' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
+                                {validReq.map((req, idx) => (
+                                    <div key={`req-${idx}`} className={`text-[10px] leading-tight px-1 py-0.5 rounded border truncate shadow-sm ${req.type === 'leave' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
                                         {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{req.applicantName}: </span>}
-                                        {req.leaveType || req.makeupType} ({req.status})
+                                        {req.type === 'leave' ? '請假' : req.makeupType}
                                     </div>
                                 ))}
                             </div>
@@ -653,9 +790,8 @@
                     <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
                     <MakeupRequestModal isOpen={isMakeupModalOpen} onClose={()=>setIsMakeupModalOpen(false)} onSubmit={handleSubmitMakeup} form={makeupForm} setForm={setMakeupForm}/>
                     <EditEmployeeModal isOpen={isEditEmpModalOpen} onClose={()=>setIsEditEmpModalOpen(false)} onSubmit={handleSaveEmployee} employee={empForm} setEmployee={setEmpForm}/>
-                    
-                    {/* 🟢 新增：編輯單據用的組件 */}
                     <EditRequestModal isOpen={!!editingRequest} onClose={()=>setEditingRequest(null)} onSubmit={handleSubmitEditRequest} reqData={editingRequest} setReqData={setEditingRequest} employees={employees} currentUser={currentUser} />
+                    <CalendarDayModal isOpen={!!selectedDateDetails} onClose={() => setSelectedDateDetails(null)} data={selectedDateDetails} employees={employees} />
 
                     <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-30">
                         <div className="max-w-6xl mx-auto px-4 h-16 flex justify-between items-center">
@@ -669,13 +805,46 @@
                     </nav>
 
                     <div className="max-w-6xl mx-auto px-4 py-8">
-                        <div className="bg-[#06C755] rounded-2xl p-6 mb-8 text-white relative shadow-md overflow-hidden flex justify-between items-center">
-                            <div className="relative z-10">
-                                <h2 className="text-2xl font-bold mb-1">早安，{currentUser.name}</h2>
-                                <p className="text-green-100 text-sm mb-3">今天也要加油喔！</p>
-                                {isDataLoading && <div className="inline-flex items-center bg-white/20 px-3 py-1 rounded text-xs animate-pulse-subtle"><RefreshCw className="w-3 h-3 mr-2 animate-spin"/>資料同步中...</div>}
+                        {/* 🟢 修正 1 & 2 & 3：自訂顏色橫幅、代理人通知、請假數據統計 */}
+                        <div className={`${bannerColor} rounded-2xl p-6 mb-8 text-white relative shadow-md overflow-visible transition-colors duration-500`}>
+                            <div className="absolute top-4 right-4">
+                                <button onClick={() => setIsColorPickerOpen(!isColorPickerOpen)} className="p-2 bg-white/20 hover:bg-white/30 rounded-full backdrop-blur-sm transition-all"><Palette className="w-5 h-5"/></button>
+                                {isColorPickerOpen && (
+                                    <div className="absolute right-0 mt-2 bg-white p-3 rounded-xl shadow-xl z-50 w-48 animate-fade-in grid grid-cols-4 gap-2 border border-gray-100">
+                                        {BANNER_COLORS.map(color => (
+                                            <button key={color} onClick={() => handleBannerColorChange(color)} className={`w-8 h-8 rounded-full ${color} ${bannerColor === color ? 'ring-2 ring-offset-2 ring-gray-400 scale-110' : ''} transition-all`}></button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <div className="bg-green-600 px-4 py-2 rounded-lg border border-green-500 text-center"><div className="text-xs text-green-100">特休餘額</div><div className="text-xl font-bold">{currentUser.annualLeaveQuota - calculateUsedAnnualLeave} <span className="text-sm">天</span></div></div>
+
+                            <div className="relative z-10 mb-4">
+                                <h2 className="text-2xl font-bold mb-1">早安，{currentUser.name}</h2>
+                                <p className="text-white/80 text-sm mb-3">今天也要加油喔！</p>
+                                {isDataLoading && <div className="inline-flex items-center bg-white/20 px-3 py-1 rounded text-xs animate-pulse-subtle"><RefreshCw className="w-3 h-3 mr-2 animate-spin"/>資料同步中...</div>}
+                                
+                                {pendingDeputyRequests.length > 0 && (
+                                    <div className="mt-3 bg-red-500/90 backdrop-blur-sm border border-red-400 text-white px-4 py-2.5 rounded-xl flex items-center shadow-sm animate-bounce cursor-pointer" onClick={() => setActiveTab('apply')}>
+                                        <Bell className="w-5 h-5 mr-2 shrink-0" />
+                                        <span className="font-bold text-sm">您有 {pendingDeputyRequests.length} 筆代理任務需要確認！</span>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="bg-black/20 backdrop-blur-sm px-4 py-3 rounded-xl border border-white/10 text-center">
+                                    <div className="text-xs text-white/80 font-medium mb-1">特休餘額</div>
+                                    <div className="text-xl font-bold">{currentUser.annualLeaveQuota - calculateUsedAnnualLeave} <span className="text-sm font-normal">天</span></div>
+                                </div>
+                                <div className="bg-black/20 backdrop-blur-sm px-4 py-3 rounded-xl border border-white/10 text-center">
+                                    <div className="text-xs text-white/80 font-medium mb-1">已用特休</div>
+                                    <div className="text-xl font-bold">{calculateUsedAnnualLeave} <span className="text-sm font-normal">天</span></div>
+                                </div>
+                                <div className="bg-black/20 backdrop-blur-sm px-4 py-3 rounded-xl border border-white/10 text-center">
+                                    <div className="text-xs text-white/80 font-medium mb-1">累計總請假</div>
+                                    <div className="text-xl font-bold">{calculateTotalLeave} <span className="text-sm font-normal">天</span></div>
+                                </div>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -696,8 +865,8 @@
                                 </div>
 
                                 <div className="flex bg-white p-1 rounded-xl shadow-sm border">
-                                    <button onClick={()=>setActiveTab('apply')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='apply'?'bg-emerald-50 text-emerald-600':'text-gray-400'}`}>假單</button>
-                                    {isManagementRole(currentUser.role) && <button onClick={()=>setActiveTab('admin')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='admin'?'bg-orange-50 text-orange-600':'text-gray-400'}`}>管理</button>}
+                                    <button onClick={() => handleTabChange('apply')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='apply'?'bg-emerald-50 text-emerald-600':'text-gray-400'}`}>假單</button>
+                                    {isManagementRole(currentUser.role) && <button onClick={() => handleTabChange('admin')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab==='admin'?'bg-orange-50 text-orange-600':'text-gray-400'}`}>管理</button>}
                                 </div>
 
                                 {activeTab === 'apply' && (
@@ -714,15 +883,37 @@
                                     </div>
                                 )}
                                 {activeTab === 'admin' && (
-                                    <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
-                                        <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
-                                        <form onSubmit={handleSaveEmployee} className="space-y-3">
-                                            <input type="text" required placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
-                                            <input type="text" required placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
-                                            <input type="text" required placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
-                                            <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
-                                            <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md">新增</button>
-                                        </form>
+                                    <div className="space-y-6">
+                                        <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
+                                            {/* 🟢 修正 5：防自動填寫 */}
+                                            <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
+                                            <form onSubmit={handleSaveEmployee} className="space-y-3" autoComplete="off">
+                                                <input type="text" required autoComplete="new-password" placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
+                                                <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
+                                                <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
+                                                <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
+                                                <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
+                                            </form>
+                                        </div>
+
+                                        {/* 🟢 修正 4：新增 Excel 匯出區塊 */}
+                                        <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-5">
+                                            <h3 className="font-bold text-blue-800 mb-4 flex items-center"><Download className="w-4 h-4 mr-2"/>資料匯出 (Excel)</h3>
+                                            <div className="space-y-3">
+                                                <div className="flex gap-2 items-center">
+                                                    <span className="text-xs text-gray-500 font-bold shrink-0">起始</span>
+                                                    <input type="date" className="w-full border rounded p-2 text-sm outline-none" value={exportDates.start} onChange={e => setExportDates({...exportDates, start: e.target.value})}/>
+                                                </div>
+                                                <div className="flex gap-2 items-center">
+                                                    <span className="text-xs text-gray-500 font-bold shrink-0">結束</span>
+                                                    <input type="date" className="w-full border rounded p-2 text-sm outline-none" value={exportDates.end} onChange={e => setExportDates({...exportDates, end: e.target.value})}/>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 pt-2">
+                                                    <button onClick={() => handleExportExcel('attendance')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors">匯出打卡</button>
+                                                    <button onClick={() => handleExportExcel('leave')} className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold py-2 rounded-lg text-xs transition-colors">匯出請假</button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -732,7 +923,6 @@
                                     <h3 className="font-bold text-lg text-gray-700">
                                         {activeTab === 'admin' ? '員工列表' : (viewMode === 'calendar' ? '出勤與請假日曆' : '近期紀錄')}
                                     </h3>
-                                    {/* 🟢 新增：列表與日曆切換按鈕 */}
                                     {activeTab !== 'admin' && (
                                         <div className="flex bg-gray-100 p-1 rounded-lg">
                                             <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center ${viewMode === 'list' ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}><List className="w-3.5 h-3.5 mr-1"/>列表</button>
@@ -772,7 +962,6 @@
                                                     <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">時間</span><span className="text-gray-700 text-xs">{req.type==='leave' ? `${req.startDate} ~ ${req.endDate}` : `${req.targetDate} ${req.targetTime}`}</span></div>
                                                     <div className="flex items-start"><span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">事由</span><span className="text-gray-600 break-all">{req.reason}</span></div>
                                                     
-                                                    {/* 🟢 新增：代理人狀態顯示 */}
                                                     {req.deputyId && (
                                                         <div className="flex items-start mt-1">
                                                             <span className="w-14 text-gray-500 text-xs font-medium shrink-0 mt-0.5">代理人</span>
@@ -786,7 +975,6 @@
                                                     )}
                                                 </div>
                                                 <div className="flex justify-end mt-3 gap-2">
-                                                    {/* 🟢 新增：代理人審核按鈕 */}
                                                     {req.deputyId === currentUser.id && req.deputyStatus === 'pending' && req.status === '待簽核' && (
                                                         <div className="flex gap-2 mr-auto">
                                                             <button onClick={() => handleDeputyAction(req.requestId, false)} className="text-xs bg-gray-50 text-gray-600 px-3 py-1.5 rounded-lg font-bold hover:bg-gray-100 border border-gray-200 transition-colors shadow-sm">拒絕代理</button>
@@ -794,7 +982,6 @@
                                                         </div>
                                                     )}
 
-                                                    {/* 🟢 新增：修改單據按鈕 */}
                                                     {currentUser.id === req.applicantId && req.status === '待簽核' && (
                                                         <div className="flex gap-3">
                                                             <button onClick={()=>setEditingRequest({...req})} className="text-xs text-blue-500 font-bold hover:text-blue-700 underline">編輯修改</button>
