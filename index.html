@@ -77,6 +77,13 @@
             }
         };
 
+        const getLocalDateString = (dateVal) => {
+            if (!dateVal) return '';
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return String(dateVal);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+
         const formatTimeDisplay = (val) => {
             if (!val) return '';
             if (typeof val === 'string' && val.includes('1899-12-30T')) {
@@ -243,7 +250,7 @@
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-                        <div className="bg-blue-600 px-6 py-4 border-b border-blue-500 flex items-center justify-between">
+                        <div className="bg-blue-600 px-6 py-4 border-b border-blue-50 flex items-center justify-between">
                             <div className="flex items-center text-white"><Edit className="w-5 h-5 mr-2"/><h3 className="font-bold">編輯{isLeave ? '請假單' : '補打卡單'}</h3></div>
                             <button onClick={onClose} className="text-blue-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
                         </div>
