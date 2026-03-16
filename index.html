@@ -7,12 +7,10 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- 引入 LINE LIFF SDK -->
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-    <!-- 引入 SheetJS 處理 Excel 匯出 -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     
-    <!-- 🟢 終極解法：使用 Import Map 強制統一 React 核心，徹底解決 createElement 衝突 -->
+    <!-- 🟢 使用 Import Map 強制統一 React 核心 -->
     <script type="importmap">
     {
         "imports": {
@@ -56,15 +54,12 @@
         import { createRoot } from 'react-dom/client';
         import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette, Tags, Trash2 } from 'lucide-react';
 
-        // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_18';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_18';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_19';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_19';
         
-        // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
         
-        // 🟢 修正 1：完整的請假類別常數
         const LEAVE_TYPES = ['特休', '事假', '病假', '婚假', '喪假', '產假', '產檢假', '陪產檢及陪產假', '生理假', '家庭照顧假', '公傷病假'];
 
         const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
@@ -151,7 +146,8 @@
             }
         };
 
-        const isManagementRole = (role) => ['管理者', '簽核者'].includes(role);
+        // 🟢 包含核定者作為管理權限
+        const isManagementRole = (role) => ['管理者', '簽核者', '核定者'].includes(role);
 
         const CompanyLogo = ({ size = 'medium', className = '' }) => {
             const sizeClasses = { small: 'h-6 text-base', medium: 'h-8 text-xl', large: 'h-12 text-3xl' };
@@ -282,7 +278,6 @@
                                     <div className="flex gap-4">
                                         <div className="flex-1">
                                             <label className="block text-sm font-bold text-gray-700 mb-1">假別</label>
-                                            {/* 🟢 修正 1：動態載入請假類別選單 */}
                                             <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.leaveType || '特休'} onChange={e=>setReqData({...reqData, leaveType: e.target.value})}>
                                                 {LEAVE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
                                             </select>
@@ -327,7 +322,6 @@
             );
         };
 
-        // 🟢 修正 4：個人更改組別的 Tag 選取器 UI
         const EditEmployeeModal = ({ isOpen, onClose, onSubmit, employee, setEmployee, systemDepartments }) => {
             if (!isOpen || !employee) return null;
             
@@ -356,7 +350,6 @@
                     <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required autoComplete="new-password" className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
                     <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required autoComplete="new-password" placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
                     
-                    {/* 🟢 修正 2 & 4：組別標籤選取器 */}
                     <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                         <label className="block text-sm font-bold text-gray-700 mb-2">所屬 / 可簽核組別 (可複選)</label>
                         {systemDepartments.length === 0 ? (
@@ -379,11 +372,20 @@
                                 })}
                             </div>
                         )}
-                        <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">提示：若是簽核者，可勾選多個組別以管理不同部門的假單。</p>
+                        <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">提示：若是簽核者/核定者，可勾選多個組別以管理不同部門的單據。</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-sm font-bold text-gray-700 mb-1">系統權限</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={employee.role} onChange={(e) => setEmployee({...employee, role: e.target.value})}><option value="申請者">申請者</option><option value="簽核者">簽核者</option><option value="管理者">管理者</option></select></div>
+                      <div>
+                          <label className="block text-sm font-bold text-gray-700 mb-1">系統權限</label>
+                          <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={employee.role} onChange={(e) => setEmployee({...employee, role: e.target.value})}>
+                              <option value="申請者">申請者</option>
+                              <option value="簽核者">簽核者</option>
+                              {/* 🟢 加入核定者 */}
+                              <option value="核定者">核定者</option>
+                              <option value="管理者">管理者</option>
+                          </select>
+                      </div>
                       <div><label className="block text-sm font-bold text-gray-700 mb-1">特休額度</label><input type="number" step="0.5" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.annualLeaveQuota} onChange={(e) => setEmployee({...employee, annualLeaveQuota: parseFloat(e.target.value)})}/></div>
                     </div>
                     <div>
@@ -409,7 +411,6 @@
             const [attendanceRecords, setAttendanceRecords] = useState(() => { const cached = localStorage.getItem(CACHE_KEY_ATT); return cached ? JSON.parse(cached) : []; });
             const [makeupRequests, setMakeupRequests] = useState([]);
             
-            // 🟢 新增：系統組別狀態
             const [systemDepartments, setSystemDepartments] = useState([]);
             const [newDeptName, setNewDeptName] = useState('');
             
@@ -492,7 +493,6 @@
                     if (data && !data.error) {
                         setEmployees(data.employees || []);
                         
-                        // 🟢 讀取組別清單
                         const depts = data.departments ? data.departments.split(',').map(d => d.trim()).filter(Boolean) : [];
                         setSystemDepartments(depts);
 
@@ -550,6 +550,7 @@
                     .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
             }, [currentUser, leaveRequests]);
 
+            // 🟢 強健的陣列排序與「核定者/簽核者」部門權限邏輯
             const visibleRequests = useMemo(() => {
                 if (!currentUser || currentUser.error) return [];
                 let allRequests = [...leaveRequests, ...makeupRequests];
@@ -565,11 +566,10 @@
                 
                 if (currentUser.role === '管理者') {
                     return allRequests;
-                } else if (currentUser.role === '簽核者') {
+                } else if (currentUser.role === '簽核者' || currentUser.role === '核定者') {
                     return allRequests.filter(r => {
                         const applicant = employees.find(e => e.id === r.applicantId);
                         
-                        // 🟢 檢查兩者的組別是否有交集
                         const applicantDepts = applicant && applicant.department ? applicant.department.split(/[,，、]/).map(d => d.trim()).filter(Boolean) : [];
                         const approverDepts = currentUser.department ? currentUser.department.split(/[,，、]/).map(d => d.trim()).filter(Boolean) : [];
                         const isSameDept = approverDepts.some(dept => applicantDepts.includes(dept));
@@ -609,7 +609,6 @@
                 }
             };
 
-            // 🟢 修正 3：管理組別的動作
             const handleAddDepartment = async () => {
                 if (!newDeptName.trim()) return;
                 if (systemDepartments.includes(newDeptName.trim())) {
@@ -1198,7 +1197,21 @@
                                                     <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
                                                     <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
                                                     
-                                                    <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
+                                                    {/* 🟢 新增介面：輸入組別 */}
+                                                    <div>
+                                                        <input type="text" placeholder="組別/部門 (例如：開發組)" className="w-full border rounded p-2 text-sm bg-gray-50" value={empForm.department || ''} onChange={e=>setEmpForm({...empForm,department:e.target.value})}/>
+                                                    </div>
+
+                                                    <div className="flex gap-2">
+                                                        <select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}>
+                                                            <option>申請者</option>
+                                                            <option>簽核者</option>
+                                                            {/* 🟢 加入核定者 */}
+                                                            <option>核定者</option>
+                                                            <option>管理者</option>
+                                                        </select>
+                                                        <input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/>
+                                                    </div>
                                                     <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
                                                 </form>
                                             </div>
@@ -1286,7 +1299,13 @@
                                                         </div>
                                                     )}
 
-                                                    {currentUser.role === '簽核者' && req.status === '待簽核' && <><button onClick={()=>handleApproval(req,false)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100">不通過</button><button onClick={()=>handleApproval(req,true)} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded border border-green-100">通過</button></>}
+                                                    {/* 🟢 修正 2：核定者與簽核者權限按鈕 (核定者無法核定自己的單) */}
+                                                    {(currentUser.role === '管理者' || currentUser.role === '簽核者' || (currentUser.role === '核定者' && req.applicantId !== currentUser.id)) && req.status === '待簽核' && (
+                                                        <>
+                                                            <button onClick={()=>handleApproval(req,false)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100">不通過</button>
+                                                            <button onClick={()=>handleApproval(req,true)} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded border border-green-100">通過</button>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         )})}
