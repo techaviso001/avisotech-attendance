@@ -10,7 +10,6 @@
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     
-    <!-- 🟢 使用 Import Map 強制統一 React 核心 -->
     <script type="importmap">
     {
         "imports": {
@@ -52,11 +51,11 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette, Tags, Trash2 } from 'lucide-react';
+        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette, Tags, Trash2, ChevronDown } from 'lucide-react';
 
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_19';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_19';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_20';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_20';
         
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
         
@@ -146,7 +145,7 @@
             }
         };
 
-        // 🟢 包含核定者作為管理權限
+        // 🟢 核定者也是管理層之一
         const isManagementRole = (role) => ['管理者', '簽核者', '核定者'].includes(role);
 
         const CompanyLogo = ({ size = 'medium', className = '' }) => {
@@ -280,6 +279,8 @@
                                             <label className="block text-sm font-bold text-gray-700 mb-1">假別</label>
                                             <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.leaveType || '特休'} onChange={e=>setReqData({...reqData, leaveType: e.target.value})}>
                                                 {LEAVE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                                                {/* 防呆機制：若舊資料有不在陣列中的選項，依然顯示出來 */}
+                                                {!LEAVE_TYPES.includes(reqData.leaveType) && <option value={reqData.leaveType}>{reqData.leaveType}</option>}
                                             </select>
                                         </div>
                                         <div className="flex-1">
@@ -322,17 +323,18 @@
             );
         };
 
+        // 🟢 將所屬與可簽核分離，並支援多選標籤
         const EditEmployeeModal = ({ isOpen, onClose, onSubmit, employee, setEmployee, systemDepartments }) => {
             if (!isOpen || !employee) return null;
             
-            const handleToggleDept = (dept) => {
-                let currentDepts = employee.department ? employee.department.split(',').map(d => d.trim()).filter(Boolean) : [];
+            const handleToggleDept = (dept, fieldName) => {
+                let currentDepts = employee[fieldName] ? employee[fieldName].split(',').map(d => d.trim()).filter(Boolean) : [];
                 if (currentDepts.includes(dept)) {
                     currentDepts = currentDepts.filter(d => d !== dept);
                 } else {
                     currentDepts.push(dept);
                 }
-                setEmployee({ ...employee, department: currentDepts.join(',') });
+                setEmployee({ ...employee, [fieldName]: currentDepts.join(',') });
             };
 
             return (
@@ -350,8 +352,9 @@
                     <div><label className="block text-sm font-bold text-gray-700 mb-1">員工姓名</label><input type="text" required autoComplete="new-password" className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={employee.name} onChange={(e) => setEmployee({...employee, name: e.target.value})}/></div>
                     <div><label className="block text-sm font-bold text-[#06C755] mb-1">LINE User ID (必填)</label><input type="text" required autoComplete="new-password" placeholder="U開頭的33碼字串" className="w-full rounded-lg border border-[#06C755] bg-green-50 p-2.5 outline-none" value={employee.lineId} onChange={(e) => setEmployee({...employee, lineId: e.target.value})}/></div>
                     
-                    <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                        <label className="block text-sm font-bold text-gray-700 mb-2">所屬 / 可簽核組別 (可複選)</label>
+                    {/* 🟢 所屬組別標籤 */}
+                    <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100">
+                        <label className="block text-sm font-bold text-blue-800 mb-2">所屬組別 (可複選)</label>
                         {systemDepartments.length === 0 ? (
                             <p className="text-xs text-gray-400">目前尚無系統組別，請先於管理面板新增。</p>
                         ) : (
@@ -360,20 +363,36 @@
                                     const currentDepts = employee.department ? employee.department.split(',').map(d => d.trim()) : [];
                                     const isSelected = currentDepts.includes(dept);
                                     return (
-                                        <button 
-                                            key={dept} 
-                                            type="button" 
-                                            onClick={() => handleToggleDept(dept)} 
-                                            className={`px-3 py-1 text-xs rounded-full border transition-colors ${isSelected ? 'bg-blue-100 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-100'}`}
-                                        >
+                                        <button key={`b_${dept}`} type="button" onClick={() => handleToggleDept(dept, 'department')} className={`px-3 py-1 text-xs rounded-full border transition-colors ${isSelected ? 'bg-blue-100 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-100'}`}>
                                             {dept}
                                         </button>
                                     );
                                 })}
                             </div>
                         )}
-                        <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">提示：若是簽核者/核定者，可勾選多個組別以管理不同部門的單據。</p>
                     </div>
+
+                    {/* 🟢 僅核定者/簽核者顯示「可簽核組別」 */}
+                    {(employee.role === '簽核者' || employee.role === '核定者') && (
+                        <div className="bg-purple-50/50 p-3 rounded-lg border border-purple-100">
+                            <label className="block text-sm font-bold text-purple-800 mb-2">可簽核組別 (可複選)</label>
+                            {systemDepartments.length === 0 ? (
+                                <p className="text-xs text-gray-400">目前尚無系統組別，請先於管理面板新增。</p>
+                            ) : (
+                                <div className="flex flex-wrap gap-2">
+                                    {systemDepartments.map(dept => {
+                                        const currentDepts = employee.approveDepartment ? employee.approveDepartment.split(',').map(d => d.trim()) : [];
+                                        const isSelected = currentDepts.includes(dept);
+                                        return (
+                                            <button key={`a_${dept}`} type="button" onClick={() => handleToggleDept(dept, 'approveDepartment')} className={`px-3 py-1 text-xs rounded-full border transition-colors ${isSelected ? 'bg-purple-100 border-purple-400 text-purple-700 font-bold' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-100'}`}>
+                                                {dept}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -381,7 +400,6 @@
                           <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={employee.role} onChange={(e) => setEmployee({...employee, role: e.target.value})}>
                               <option value="申請者">申請者</option>
                               <option value="簽核者">簽核者</option>
-                              {/* 🟢 加入核定者 */}
                               <option value="核定者">核定者</option>
                               <option value="管理者">管理者</option>
                           </select>
@@ -405,6 +423,53 @@
             );
         };
 
+        // 🟢 新增：組別成員管理的 Modal
+        const DeptMembersModal = ({ isOpen, onClose, deptName, employees, onSubmit }) => {
+            const [selectedIds, setSelectedIds] = useState([]);
+            
+            useEffect(() => {
+                if (isOpen && deptName) {
+                    const currentMembers = employees.filter(e => {
+                        const depts = e.department ? e.department.split(',').map(d=>d.trim()) : [];
+                        return depts.includes(deptName);
+                    }).map(e => e.id);
+                    setSelectedIds(currentMembers);
+                }
+            }, [isOpen, deptName, employees]);
+
+            if (!isOpen) return null;
+
+            const handleToggle = (empId) => {
+                if (selectedIds.includes(empId)) setSelectedIds(selectedIds.filter(id => id !== empId));
+                else setSelectedIds([...selectedIds, empId]);
+            };
+
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden flex flex-col max-h-[80vh]">
+                  <div className="bg-purple-600 px-6 py-4 border-b border-purple-500 flex items-center justify-between shrink-0">
+                    <div className="flex items-center text-white"><Users className="w-5 h-5 mr-2" /><h3 className="font-bold">「{deptName}」成員管理</h3></div>
+                    <button onClick={onClose} className="text-purple-200 hover:text-white"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="p-6 overflow-y-auto flex-1 space-y-2">
+                      <p className="text-xs text-gray-500 mb-3">請勾選隸屬於此組別的員工：</p>
+                      {employees.map(emp => (
+                          <label key={emp.id} className="flex items-center p-3 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer border border-gray-100">
+                              <input type="checkbox" checked={selectedIds.includes(emp.id)} onChange={() => handleToggle(emp.id)} className="w-4 h-4 text-purple-600 rounded border-gray-300 mr-3" />
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold mr-2 ${emp.avatarColor || 'bg-gray-400'}`}>{emp.name[0]}</div>
+                              <span className="font-bold text-sm text-gray-700 flex-1">{emp.name}</span>
+                              <span className="text-[10px] text-gray-400">{emp.role}</span>
+                          </label>
+                      ))}
+                  </div>
+                  <div className="p-4 bg-gray-50 border-t border-gray-100 shrink-0">
+                      <button onClick={() => onSubmit(deptName, selectedIds)} className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-md transition-colors">儲存名單設定</button>
+                  </div>
+                </div>
+              </div>
+            );
+        };
+
         function LeaveApp() {
             const [employees, setEmployees] = useState(() => { const cached = localStorage.getItem(CACHE_KEY_EMP); return cached ? JSON.parse(cached) : []; });
             const [leaveRequests, setLeaveRequests] = useState([]);
@@ -413,6 +478,7 @@
             
             const [systemDepartments, setSystemDepartments] = useState([]);
             const [newDeptName, setNewDeptName] = useState('');
+            const [managingDept, setManagingDept] = useState(null); // 🟢 正在管理成員的組別
             
             const [currentUser, setCurrentUser] = useState(null);
             const [lineProfile, setLineProfile] = useState(null);
@@ -427,14 +493,16 @@
             
             const [leaveForm, setLeaveForm] = useState({ leaveType: '特休', startDate: '', endDate: '', startSession: '上午', endSession: '下午', reason: '', deputyId: '' });
             const [makeupForm, setMakeupForm] = useState({ targetDate: getTodayString(), targetTime: '09:00', makeupType: '上班', reason: '' });
-            const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', department: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
+            const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', department: '', approveDepartment: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
 
             const [viewMode, setViewMode] = useState('list'); 
             const [currentMonth, setCurrentMonth] = useState(new Date());
             
-            const [showAllInCalendar, setShowAllInCalendar] = useState(false); 
+            const [calendarFilter, setCalendarFilter] = useState('self'); // 🟢 取代 toggle，改為下拉過濾器
+            
             const [editingRequest, setEditingRequest] = useState(null);
             const [selectedDateDetails, setSelectedDateDetails] = useState(null); 
+            const [showTodayLeaves, setShowTodayLeaves] = useState(false); // 🟢 今日請假展開控制
 
             const [bannerColor, setBannerColor] = useState('bg-[#06C755]');
             const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
@@ -550,7 +618,6 @@
                     .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
             }, [currentUser, leaveRequests]);
 
-            // 🟢 強健的陣列排序與「核定者/簽核者」部門權限邏輯
             const visibleRequests = useMemo(() => {
                 if (!currentUser || currentUser.error) return [];
                 let allRequests = [...leaveRequests, ...makeupRequests];
@@ -569,11 +636,11 @@
                 } else if (currentUser.role === '簽核者' || currentUser.role === '核定者') {
                     return allRequests.filter(r => {
                         const applicant = employees.find(e => e.id === r.applicantId);
-                        
                         const applicantDepts = applicant && applicant.department ? applicant.department.split(/[,，、]/).map(d => d.trim()).filter(Boolean) : [];
-                        const approverDepts = currentUser.department ? currentUser.department.split(/[,，、]/).map(d => d.trim()).filter(Boolean) : [];
-                        const isSameDept = approverDepts.some(dept => applicantDepts.includes(dept));
+                        // 🟢 使用 approveDepartment 取代 department 進行權限驗證
+                        const approverDepts = currentUser.approveDepartment ? currentUser.approveDepartment.split(/[,，、]/).map(d => d.trim()).filter(Boolean) : [];
                         
+                        const isSameDept = approverDepts.some(dept => applicantDepts.includes(dept));
                         return r.applicantId === currentUser.id || r.deputyId === currentUser.id || isSameDept;
                     });
                 } else {
@@ -605,7 +672,7 @@
             const handleTabChange = (tab) => {
                 setActiveTab(tab);
                 if(tab === 'admin') {
-                    setEmpForm({ id: '', name: '', role: '申請者', lineId: '', department: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
+                    setEmpForm({ id: '', name: '', role: '申請者', lineId: '', department: '', approveDepartment: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
                 }
             };
 
@@ -627,6 +694,24 @@
                     closeModal();
                     await callApi("updateDepartments", { departments: newDepts.join(',') });
                 });
+            };
+
+            // 🟢 新增：送出組別成員更新
+            const handleSaveDeptMembers = async (deptName, selectedIds) => {
+                const newEmployees = employees.map(emp => {
+                     let depts = emp.department ? emp.department.split(',').map(d=>d.trim()).filter(Boolean) : [];
+                     if (selectedIds.includes(emp.id) && !depts.includes(deptName)) {
+                         depts.push(deptName);
+                     } else if (!selectedIds.includes(emp.id) && depts.includes(deptName)) {
+                         depts = depts.filter(d => d !== deptName);
+                     }
+                     return { ...emp, department: depts.join(',') };
+                });
+                setEmployees(newEmployees);
+                localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(newEmployees));
+                setManagingDept(null);
+                showAlert('成功', `已更新「${deptName}」成員名單`, 'success');
+                await callApi("batchUpdateDeptMembers", { deptName, employeeIds: selectedIds });
             };
 
             const handleExportExcel = (type) => {
@@ -890,7 +975,7 @@
 
             const handleSaveEmployee = async (e) => {
                 e.preventDefault();
-                const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, department: empForm.department, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0, bannerColor: 'bg-[#06C755]' };
+                const newEmployee = { id: empForm.id, name: empForm.name, role: empForm.role, lineId: empForm.lineId, department: empForm.department, approveDepartment: empForm.approveDepartment, avatarColor: empForm.avatarColor || 'bg-indigo-500', annualLeaveQuota: parseFloat(empForm.annualLeaveQuota) || 0, bannerColor: 'bg-[#06C755]' };
                 const updatedList = empForm.isEdit ? employees.map(emp => emp.id === empForm.id ? newEmployee : emp) : [...employees, newEmployee];
                 setEmployees(updatedList);
                 localStorage.setItem(CACHE_KEY_EMP, JSON.stringify(updatedList));
@@ -909,9 +994,24 @@
                 let calRequests = visibleRequests;
                 let calAttendance = attendanceRecords;
 
-                if (!showAllInCalendar) {
+                // 🟢 日曆：支援下拉選單深度過濾
+                if (calendarFilter === 'self') {
                     calRequests = calRequests.filter(r => r.applicantId === currentUser?.id);
                     calAttendance = calAttendance.filter(r => r.employeeId === currentUser?.id);
+                } else if (calendarFilter.startsWith('dept_')) {
+                    const targetDept = calendarFilter.replace('dept_', '');
+                    calRequests = calRequests.filter(r => {
+                        const emp = employees.find(e => e.id === r.applicantId);
+                        return emp && emp.department && emp.department.includes(targetDept);
+                    });
+                    calAttendance = calAttendance.filter(r => {
+                        const emp = employees.find(e => e.id === r.employeeId);
+                        return emp && emp.department && emp.department.includes(targetDept);
+                    });
+                } else if (calendarFilter.startsWith('emp_')) {
+                    const targetEmp = calendarFilter.replace('emp_', '');
+                    calRequests = calRequests.filter(r => r.applicantId === targetEmp);
+                    calAttendance = calAttendance.filter(r => r.employeeId === targetEmp);
                 }
 
                 for (let i = 0; i < firstDay; i++) {
@@ -934,13 +1034,13 @@
                             <div className="flex-1 overflow-y-auto space-y-1 mt-1 scrollbar-hide pointer-events-none">
                                 {dayAtt.map((att, idx) => (
                                     <div key={`att-${idx}`} className="text-[10px] leading-tight text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 truncate shadow-sm">
-                                        {isManagementRole(currentUser.role) && showAllInCalendar && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
+                                        {isManagementRole(currentUser.role) && calendarFilter !== 'self' && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
                                         {att.checkInTime ? `入${att.checkInTime}` : ''} {att.checkOutTime ? `出${att.checkOutTime}` : ''}
                                     </div>
                                 ))}
                                 {validReq.map((req, idx) => (
                                     <div key={`req-${idx}`} className={`text-[10px] leading-tight px-1 py-0.5 rounded border truncate shadow-sm ${req.type === 'leave' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
-                                        {isManagementRole(currentUser.role) && showAllInCalendar && <span className="font-bold">{req.applicantName}: </span>}
+                                        {isManagementRole(currentUser.role) && calendarFilter !== 'self' && <span className="font-bold">{req.applicantName}: </span>}
                                         {req.type === 'leave' ? '請假' : req.makeupType}
                                     </div>
                                 ))}
@@ -949,22 +1049,48 @@
                     );
                 }
 
+                // 🟢 整理下拉選單的人員清單，確保只能看到有權限看的員工
+                const visibleEmployees = employees.filter(e => {
+                    if (currentUser.role === '管理者') return true;
+                    if (currentUser.role === '簽核者' || currentUser.role === '核定者') {
+                        const empDepts = e.department ? e.department.split(/[,，、]/).map(d=>d.trim()) : [];
+                        const myDepts = currentUser.approveDepartment ? currentUser.approveDepartment.split(/[,，、]/).map(d=>d.trim()) : [];
+                        return myDepts.some(d => empDepts.includes(d)) || e.id === currentUser.id;
+                    }
+                    return false;
+                });
+
                 return (
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in">
-                        <div className="p-3 flex justify-between items-center border-b border-gray-100 bg-gray-50">
+                        <div className="p-3 flex justify-between items-center border-b border-gray-100 bg-gray-50 flex-wrap gap-2">
                             <div className="flex items-center gap-3">
                                 <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronLeft className="w-4 h-4 text-gray-600"/></button>
-                                <span className="font-bold text-gray-700">{year}年 {month + 1}月</span>
+                                <span className="font-bold text-gray-700 whitespace-nowrap">{year}年 {month + 1}月</span>
                                 <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronRight className="w-4 h-4 text-gray-600"/></button>
                             </div>
                             
+                            {/* 🟢 修正：下拉式過濾器 */}
                             {isManagementRole(currentUser.role) && (
-                                <button 
-                                    onClick={() => setShowAllInCalendar(!showAllInCalendar)} 
-                                    className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors ${showAllInCalendar ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                                <select 
+                                    className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm outline-none w-32 md:w-auto"
+                                    value={calendarFilter} 
+                                    onChange={(e) => setCalendarFilter(e.target.value)}
                                 >
-                                    {showAllInCalendar ? '目前：顯示所有人' : '目前：僅顯示自己'}
-                                </button>
+                                    <option value="self">僅顯示自己</option>
+                                    <option value="all">顯示所有人</option>
+                                    
+                                    {systemDepartments.length > 0 && (
+                                        <optgroup label="── 依組別 ──">
+                                            {systemDepartments.map(d => <option key={`dept_${d}`} value={`dept_${d}`}>{d}</option>)}
+                                        </optgroup>
+                                    )}
+                                    
+                                    {visibleEmployees.length > 0 && (
+                                        <optgroup label="── 依員工 ──">
+                                            {visibleEmployees.map(e => <option key={`emp_${e.id}`} value={`emp_${e.id}`}>{e.name}</option>)}
+                                        </optgroup>
+                                    )}
+                                </select>
                             )}
                         </div>
                         <div className="grid grid-cols-7 text-center text-xs font-bold text-gray-500 bg-white border-b border-gray-100">
@@ -1028,9 +1154,9 @@
                     <Modal isOpen={modal.isOpen} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} onClose={closeModal}/>
                     <MakeupRequestModal isOpen={isMakeupModalOpen} onClose={()=>setIsMakeupModalOpen(false)} onSubmit={handleSubmitMakeup} form={makeupForm} setForm={setMakeupForm}/>
                     
-                    {/* 🟢 傳遞 systemDepartments 給編輯視窗 */}
                     <EditEmployeeModal isOpen={isEditEmpModalOpen} onClose={()=>setIsEditEmpModalOpen(false)} onSubmit={handleSaveEmployee} employee={empForm} setEmployee={setEmpForm} systemDepartments={systemDepartments}/>
-                    
+                    <DeptMembersModal isOpen={!!managingDept} onClose={()=>setManagingDept(null)} deptName={managingDept} employees={employees} onSubmit={handleSaveDeptMembers} />
+
                     <EditRequestModal isOpen={!!editingRequest} onClose={()=>setEditingRequest(null)} onSubmit={handleSubmitEditRequest} reqData={editingRequest} setReqData={setEditingRequest} employees={employees} currentUser={currentUser} />
                     <CalendarDayModal isOpen={!!selectedDateDetails} onClose={() => setSelectedDateDetails(null)} data={selectedDateDetails} employees={employees} />
 
@@ -1047,16 +1173,31 @@
 
                     <div className="max-w-6xl mx-auto px-4 py-8">
                         
+                        {/* 🟢 修正 5：今日請假改為可點擊展開的選單 */}
                         {isManagementRole(currentUser.role) && todaysLeaves.length > 0 && (
-                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 shadow-sm animate-fade-in">
-                                <h3 className="font-bold text-blue-800 mb-2 flex items-center"><Users className="w-4 h-4 mr-2"/>今日請假人員 ({todaysLeaves.length} 人)</h3>
-                                <div className="flex flex-wrap gap-2">
-                                    {todaysLeaves.map(req => (
-                                        <span key={req.requestId} className="bg-white text-blue-700 text-xs font-bold px-2.5 py-1 rounded shadow-sm border border-blue-100">
-                                            {req.applicantName} ({req.leaveType})
-                                        </span>
-                                    ))}
+                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 shadow-sm animate-fade-in transition-all">
+                                <div className="flex justify-between items-center cursor-pointer" onClick={() => setShowTodayLeaves(!showTodayLeaves)}>
+                                    <h3 className="font-bold text-blue-800 flex items-center select-none"><Users className="w-4 h-4 mr-2"/>今日請假人員 ({todaysLeaves.length} 人)</h3>
+                                    <button className="p-1 rounded hover:bg-blue-100 transition-colors">
+                                        <ChevronDown className={`w-5 h-5 text-blue-600 transition-transform duration-300 ${showTodayLeaves ? 'rotate-180' : ''}`} />
+                                    </button>
                                 </div>
+                                {showTodayLeaves && (
+                                    <div className="mt-3 pt-3 border-t border-blue-200/50 flex flex-col gap-2">
+                                        {todaysLeaves.map(req => (
+                                            <div key={req.requestId} className="bg-white p-3 rounded-lg shadow-sm border border-blue-100 flex justify-between items-center animate-fade-in">
+                                                <div>
+                                                    <div className="font-bold text-gray-800 text-sm">{req.applicantName}</div>
+                                                    <div className="text-xs text-gray-500 mt-0.5">{req.reason}</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">{req.leaveType}</span>
+                                                    <div className="text-[10px] text-gray-400 mt-1">{req.startSession} ~ {req.endSession}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -1128,7 +1269,6 @@
                                         <h3 className="font-bold text-gray-700 mb-4 flex items-center"><FileText className="w-4 h-4 mr-2"/>填寫假單</h3>
                                         <form onSubmit={handleSubmitLeave} className="space-y-4">
                                             <div className="flex gap-2">
-                                                {/* 🟢 載入完整的假別 */}
                                                 <select className="flex-1 border rounded p-2 text-sm" value={leaveForm.leaveType} onChange={e=>setLeaveForm({...leaveForm,leaveType:e.target.value})}>
                                                     {LEAVE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
                                                 </select>
@@ -1145,7 +1285,6 @@
                                 {activeTab === 'admin' && (
                                     <div className="space-y-6">
                                         
-                                        {/* 🟢 修正 3：新增組別分類管理 (僅管理者) */}
                                         {currentUser.role === '管理者' && (
                                             <div className="bg-white rounded-xl shadow-sm border border-purple-100 p-5">
                                                 <h3 className="font-bold text-purple-800 mb-4 flex items-center"><Hexagon className="w-4 h-4 mr-2"/>組別分類管理</h3>
@@ -1156,15 +1295,17 @@
                                                 {systemDepartments.length > 0 ? (
                                                     <div className="flex flex-wrap gap-2">
                                                         {systemDepartments.map(dept => (
-                                                            <div key={dept} className="flex items-center bg-purple-50 text-purple-700 border border-purple-200 text-sm font-bold px-3 py-1 rounded-full shadow-sm">
+                                                            <div key={dept} className="flex items-center bg-purple-50 text-purple-700 border border-purple-200 text-sm font-bold px-3 py-1 rounded-full shadow-sm transition-transform hover:scale-105">
                                                                 <Tags className="w-3 h-3 mr-1" />{dept}
-                                                                <button onClick={() => handleRemoveDepartment(dept)} className="ml-2 text-purple-400 hover:text-red-500 transition-colors"><X className="w-3 h-3" /></button>
+                                                                <button onClick={() => { setManagingDept(dept); }} className="ml-2 text-purple-500 hover:text-purple-700 transition-colors" title="編輯成員"><Users className="w-3 h-3" /></button>
+                                                                <button onClick={() => handleRemoveDepartment(dept)} className="ml-2 text-purple-400 hover:text-red-500 transition-colors" title="刪除組別"><X className="w-3 h-3" /></button>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 ) : (
                                                     <p className="text-xs text-gray-400 text-center py-2">目前沒有設定任何組別</p>
                                                 )}
+                                                <p className="text-[10px] text-gray-400 mt-3 text-center">點擊 <Users className="w-3 h-3 inline mx-0.5" /> 圖示以管理該組別成員</p>
                                             </div>
                                         )}
 
@@ -1197,16 +1338,10 @@
                                                     <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
                                                     <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
                                                     
-                                                    {/* 🟢 新增介面：輸入組別 */}
-                                                    <div>
-                                                        <input type="text" placeholder="組別/部門 (例如：開發組)" className="w-full border rounded p-2 text-sm bg-gray-50" value={empForm.department || ''} onChange={e=>setEmpForm({...empForm,department:e.target.value})}/>
-                                                    </div>
-
                                                     <div className="flex gap-2">
                                                         <select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}>
                                                             <option>申請者</option>
                                                             <option>簽核者</option>
-                                                            {/* 🟢 加入核定者 */}
                                                             <option>核定者</option>
                                                             <option>管理者</option>
                                                         </select>
@@ -1214,6 +1349,7 @@
                                                     </div>
                                                     <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
                                                 </form>
+                                                <p className="text-[10px] text-gray-500 mt-2 text-center leading-relaxed">提示：新增後，請於員工列表點擊「編輯」以指派所屬與簽核組別。</p>
                                             </div>
                                         )}
                                     </div>
@@ -1237,15 +1373,27 @@
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {employees.map(emp => (
                                             <div key={emp.id} className="bg-white p-4 rounded-xl border border-gray-100 flex items-center shadow-sm relative group">
-                                                <button onClick={() => { setEmpForm({...emp, isEdit:true}); setIsEditEmpModalOpen(true); }} className="absolute top-2 right-2 p-1 text-gray-400 hover:text-orange-600"><Edit className="w-4 h-4" /></button>
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${emp.avatarColor || 'bg-gray-400'}`}>{emp.name[0]}</div>
-                                                <div className="ml-3">
+                                                {currentUser.role === '管理者' && (
+                                                    <button onClick={() => { setEmpForm({...emp, isEdit:true}); setIsEditEmpModalOpen(true); }} className="absolute top-2 right-2 p-1 text-gray-400 hover:text-orange-600"><Edit className="w-4 h-4" /></button>
+                                                )}
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${emp.avatarColor || 'bg-gray-400'} shrink-0`}>{emp.name[0]}</div>
+                                                <div className="ml-3 overflow-hidden">
                                                     <div className="font-bold text-sm">{emp.name} <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1 rounded ml-1">{emp.role}</span></div>
-                                                    {/* 🟢 顯示該員工綁定的組別標籤 */}
+                                                    
+                                                    {/* 所屬組別標籤 */}
                                                     <div className="flex flex-wrap gap-1 mt-1 mb-0.5">
-                                                        {emp.department ? emp.department.split(',').map(d => <span key={d} className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 rounded">{d.trim()}</span>) : <span className="text-[10px] text-gray-400">未分組</span>}
+                                                        {emp.department ? emp.department.split(',').map(d => <span key={d} className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-100 px-1.5 rounded">{d.trim()}</span>) : <span className="text-[10px] text-gray-400">未分組</span>}
                                                     </div>
-                                                    <div className="text-[10px] text-[#06C755] font-mono w-32 truncate">{emp.lineId}</div>
+                                                    
+                                                    {/* 管理/簽核組別標籤 */}
+                                                    {(emp.role === '簽核者' || emp.role === '核定者') && emp.approveDepartment && (
+                                                        <div className="flex flex-wrap gap-1 mb-0.5">
+                                                            <span className="text-[9px] text-gray-400 mr-1 mt-0.5">負責</span>
+                                                            {emp.approveDepartment.split(',').map(d => <span key={d} className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 rounded">{d.trim()}</span>)}
+                                                        </div>
+                                                    )}
+
+                                                    <div className="text-[10px] text-[#06C755] font-mono mt-0.5 w-32 truncate">{emp.lineId}</div>
                                                     <div className="text-xs text-gray-500 mt-0.5">特休: {emp.annualLeaveQuota}</div>
                                                 </div>
                                             </div>
@@ -1257,6 +1405,9 @@
                                         {visibleRequests.length === 0 ? <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed">無近期紀錄</div> : visibleRequests.map(req => {
                                             const deputyEmp = req.deputyId ? employees.find(e => e.id === req.deputyId) : null;
                                             const deputyName = deputyEmp ? deputyEmp.name : req.deputyName;
+                                            
+                                            // 🟢 檢查目前使用者是否具備簽核此單據的權限
+                                            const canApproveReq = (currentUser.role === '簽核者') || (currentUser.role === '核定者' && req.applicantId !== currentUser.id);
 
                                             return (
                                             <div key={req.requestId} className="bg-white p-4 rounded-xl border shadow-sm relative">
@@ -1299,8 +1450,8 @@
                                                         </div>
                                                     )}
 
-                                                    {/* 🟢 修正 2：核定者與簽核者權限按鈕 (核定者無法核定自己的單) */}
-                                                    {(currentUser.role === '管理者' || currentUser.role === '簽核者' || (currentUser.role === '核定者' && req.applicantId !== currentUser.id)) && req.status === '待簽核' && (
+                                                    {/* 🟢 簽核權限過濾：排除管理者，且核定者不能簽核自己 */}
+                                                    {canApproveReq && req.status === '待簽核' && (
                                                         <>
                                                             <button onClick={()=>handleApproval(req,false)} className="text-xs bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100">不通過</button>
                                                             <button onClick={()=>handleApproval(req,true)} className="text-xs bg-green-50 text-green-600 px-2 py-1 rounded border border-green-100">通過</button>
