@@ -47,14 +47,21 @@
 
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_10';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_10';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_11';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_11';
         
         // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
         
         const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
-        const BANNER_COLORS = ['bg-[#06C755]', 'bg-blue-600', 'bg-indigo-600', 'bg-violet-600', 'bg-rose-600', 'bg-orange-600', 'bg-slate-800'];
+        
+        // 🟢 修正 4：擴充自選顏色庫
+        const BANNER_COLORS = [
+            'bg-[#06C755]', 'bg-emerald-600', 'bg-teal-600', 'bg-cyan-600',
+            'bg-sky-600', 'bg-blue-600', 'bg-indigo-600', 'bg-violet-600',
+            'bg-purple-600', 'bg-fuchsia-600', 'bg-pink-600', 'bg-rose-600',
+            'bg-red-600', 'bg-orange-600', 'bg-amber-500', 'bg-slate-800'
+        ];
 
         const callApi = async (action, payload = {}) => {
             try {
@@ -70,7 +77,6 @@
             }
         };
 
-        // 加入強健的時區與格式解析器
         const formatTimeDisplay = (val) => {
             if (!val) return '';
             if (typeof val === 'string' && val.includes('1899-12-30T')) {
@@ -351,15 +357,16 @@
 
             const [viewMode, setViewMode] = useState('list'); 
             const [currentMonth, setCurrentMonth] = useState(new Date());
-            const [calendarUserFilter, setCalendarUserFilter] = useState('all');
+            
+            // 🟢 修正 1：日曆預設只顯示自己，新增切換按鈕
+            const [showAllInCalendar, setShowAllInCalendar] = useState(false); 
+            
             const [editingRequest, setEditingRequest] = useState(null);
             const [selectedDateDetails, setSelectedDateDetails] = useState(null); 
 
-            // 橫幅顏色狀態
             const [bannerColor, setBannerColor] = useState('bg-[#06C755]');
             const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
-            // Excel 匯出日期區間狀態
             const [exportDates, setExportDates] = useState({ start: getTodayString(), end: getTodayString() });
 
             useEffect(() => {
@@ -415,14 +422,21 @@
                     if (data && !data.error) {
                         setEmployees(data.employees || []);
                         
-                        const parsedReqs = (data.leaveRequests || []).map(r => {
-                            const explicitType = r.RecordType || r[Object.keys(r)[15]];
-                            const recordType = explicitType || (r[Object.keys(r)[3]] === '補打卡' ? 'makeup' : 'leave');
-                            return { ...r, type: recordType };
-                        });
+                        // 🟢 獨立解析 LeaveRequests 與 MakeupRequests
+                        const parsedLeaves = (data.leaveRequests || []).map(r => ({ 
+                            ...r, type: 'leave',
+                            startDate: getLocalDateString(r.startDate),
+                            endDate: getLocalDateString(r.endDate)
+                        }));
+                        
+                        const parsedMakeups = (data.makeupRequests || []).map(r => ({ 
+                            ...r, type: 'makeup',
+                            targetDate: getLocalDateString(r.targetDate),
+                            targetTime: formatTimeDisplay(r.targetTime)
+                        }));
 
-                        setLeaveRequests(parsedReqs.filter(r => r.type === 'leave'));
-                        setMakeupRequests(parsedReqs.filter(r => r.type === 'makeup'));
+                        setLeaveRequests(parsedLeaves);
+                        setMakeupRequests(parsedMakeups);
                         
                         const parsedAttendance = (data.attendance || []).map(a => ({
                             ...a,
@@ -476,6 +490,12 @@
                 return leaveRequests.filter(r => r.deputyId === currentUser.id && r.deputyStatus === 'pending' && r.status === '待簽核');
             }, [currentUser, leaveRequests]);
 
+            // 🟢 新增：過濾並顯示今日有請假的人員 (給管理者與簽核者看)
+            const todaysLeaves = useMemo(() => {
+                const todayStr = getTodayString();
+                return leaveRequests.filter(r => r.status === '通過' && r.startDate <= todayStr && r.endDate >= todayStr);
+            }, [leaveRequests]);
+
             const handleBannerColorChange = (color) => {
                 setBannerColor(color);
                 setIsColorPickerOpen(false);
@@ -494,6 +514,7 @@
                 }
             };
 
+            // 🟢 修正 3：匯出請假改用 startDate 與 targetDate 當作過濾依據
             const handleExportExcel = (type) => {
                 if (!exportDates.start || !exportDates.end) {
                     showAlert('錯誤', '請選擇完整的起始與結束日期', 'error'); return;
@@ -508,8 +529,8 @@
                 if (type === 'leave') {
                     const allReq = [...leaveRequests, ...makeupRequests];
                     const filtered = allReq.filter(r => {
-                        const reqDate = r.applyTime.replace(/\//g, '-').substring(0, 10);
-                        return reqDate >= exportDates.start && reqDate <= exportDates.end;
+                        const recordDate = r.type === 'leave' ? r.startDate : r.targetDate;
+                        return recordDate >= exportDates.start && recordDate <= exportDates.end;
                     });
                     
                     dataToExport = filtered.map(r => ({
@@ -540,7 +561,7 @@
                 }
 
                 if (dataToExport.length === 0) {
-                    showAlert('提示', '此區間內沒有任何資料', 'alert'); return;
+                    showAlert('提示', '此區間內沒有任何資料符合條件', 'alert'); return;
                 }
 
                 const ws = XLSX.utils.json_to_sheet(dataToExport);
@@ -614,7 +635,7 @@
                 const status = isAgreed ? 'agreed' : 'rejected';
                 setLeaveRequests(prev => prev.map(req => req.requestId === requestId ? { ...req, deputyStatus: status } : req));
                 showAlert('已回覆', `您已${isAgreed ? '同意' : '拒絕'}代理`, isAgreed ? 'success' : 'alert');
-                await callApi("updateRequestStatus", { requestId, deputyStatus: status });
+                await callApi("updateRequestStatus", { requestId, type: 'leave', deputyStatus: status });
             };
 
             const handleSubmitEditRequest = async (e) => {
@@ -652,21 +673,28 @@
             const handleApproval = async (req, isApproved) => {
                 const status = isApproved ? '通過' : '不通過';
                 const now = new Date().toLocaleString('zh-TW', { hour12: false });
-                const approvalData = { status, approverName: currentUser.name, approvalTime: now };
-                if (req.type === 'leave') setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
-                else {
+                const approvalData = { 
+                    type: req.type, status, approverName: currentUser.name, approvalTime: now,
+                    applicantId: req.applicantId, targetDate: req.targetDate, targetTime: req.targetTime, makeupType: req.makeupType
+                };
+                
+                if (req.type === 'leave') {
+                    setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
+                } else {
                     setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
+                    
+                    // 🟢 補打卡通過，在前端同步更新 Attendance 視圖
                     if (isApproved) {
                          setAttendanceRecords(prev => {
                             const existingIndex = prev.findIndex(rec => rec.employeeId === req.applicantId && rec.date === req.targetDate);
                             if (existingIndex >= 0) {
                                 const updated = [...prev];
-                                if (req.makeupType === '上班') updated[existingIndex].checkInTime = req.targetTime + ':00';
-                                else updated[existingIndex].checkOutTime = req.targetTime + ':00';
+                                if (req.makeupType === '上班') updated[existingIndex].checkInTime = req.targetTime;
+                                else updated[existingIndex].checkOutTime = req.targetTime;
                                 localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(updated));
                                 return updated;
                             } else {
-                                const newRecord = { recordId: `ATT-MK-${Date.now()}`, employeeId: req.applicantId, date: req.targetDate, checkInTime: req.makeupType === '上班' ? req.targetTime + ':00' : null, checkOutTime: req.makeupType === '下班' ? req.targetTime + ':00' : null };
+                                const newRecord = { recordId: `ATT-MK-${Date.now()}`, employeeId: req.applicantId, date: req.targetDate, checkInTime: req.makeupType === '上班' ? req.targetTime : '', checkOutTime: req.makeupType === '下班' ? req.targetTime : '' };
                                 const newRecords = [...prev, newRecord];
                                 localStorage.setItem(CACHE_KEY_ATT, JSON.stringify(newRecords));
                                 return newRecords;
@@ -680,7 +708,7 @@
             const handleCancelRequest = (req) => {
                 showConfirm('確認取消', '確定要取消此申請嗎？', async () => {
                     const now = new Date().toLocaleString('zh-TW', { hour12: false });
-                    const updateData = { status: '已取消', approverName: currentUser?.name, approvalTime: now };
+                    const updateData = { type: req.type, status: '已取消', approverName: currentUser?.name, approvalTime: now };
                     if (req.type === 'leave') setLeaveRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...updateData } : r));
                     else setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...updateData } : r));
                     closeModal(); await callApi("updateRequestStatus", { requestId: req.requestId, ...updateData });
@@ -708,9 +736,10 @@
                 let calRequests = visibleRequests;
                 let calAttendance = attendanceRecords;
 
-                if (isManagementRole(currentUser.role) && calendarUserFilter !== 'all') {
-                    calRequests = calRequests.filter(r => r.applicantId === calendarUserFilter);
-                    calAttendance = calAttendance.filter(r => r.employeeId === calendarUserFilter);
+                // 🟢 修正 1：依照 showAllInCalendar 按鈕來決定是否顯示所有人
+                if (!showAllInCalendar) {
+                    calRequests = calRequests.filter(r => r.applicantId === currentUser?.id);
+                    calAttendance = calAttendance.filter(r => r.employeeId === currentUser?.id);
                 }
 
                 for (let i = 0; i < firstDay; i++) {
@@ -733,13 +762,13 @@
                             <div className="flex-1 overflow-y-auto space-y-1 mt-1 scrollbar-hide pointer-events-none">
                                 {dayAtt.map((att, idx) => (
                                     <div key={`att-${idx}`} className="text-[10px] leading-tight text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 truncate shadow-sm">
-                                        {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
+                                        {isManagementRole(currentUser.role) && showAllInCalendar && <span className="font-bold">{employees.find(e=>e.id===att.employeeId)?.name}: </span>}
                                         {att.checkInTime ? `入${att.checkInTime}` : ''} {att.checkOutTime ? `出${att.checkOutTime}` : ''}
                                     </div>
                                 ))}
                                 {validReq.map((req, idx) => (
                                     <div key={`req-${idx}`} className={`text-[10px] leading-tight px-1 py-0.5 rounded border truncate shadow-sm ${req.type === 'leave' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
-                                        {isManagementRole(currentUser.role) && calendarUserFilter === 'all' && <span className="font-bold">{req.applicantName}: </span>}
+                                        {isManagementRole(currentUser.role) && showAllInCalendar && <span className="font-bold">{req.applicantName}: </span>}
                                         {req.type === 'leave' ? '請假' : req.makeupType}
                                     </div>
                                 ))}
@@ -756,11 +785,15 @@
                                 <span className="font-bold text-gray-700">{year}年 {month + 1}月</span>
                                 <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronRight className="w-4 h-4 text-gray-600"/></button>
                             </div>
+                            
+                            {/* 🟢 修正 1：更換為按鈕切換 */}
                             {isManagementRole(currentUser.role) && (
-                                <select className="text-xs font-bold border border-gray-200 rounded-lg p-1.5 bg-white text-gray-700 shadow-sm outline-none" value={calendarUserFilter} onChange={(e) => setCalendarUserFilter(e.target.value)}>
-                                    <option value="all">顯示所有人</option>
-                                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                                </select>
+                                <button 
+                                    onClick={() => setShowAllInCalendar(!showAllInCalendar)} 
+                                    className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors ${showAllInCalendar ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                                >
+                                    {showAllInCalendar ? '目前：顯示所有人' : '目前：僅顯示自己'}
+                                </button>
                             )}
                         </div>
                         <div className="grid grid-cols-7 text-center text-xs font-bold text-gray-500 bg-white border-b border-gray-100">
@@ -839,12 +872,26 @@
                     </nav>
 
                     <div className="max-w-6xl mx-auto px-4 py-8">
-                        {/* 🟢 自訂顏色橫幅、代理人通知、請假數據統計 */}
+                        
+                        {/* 🟢 修正 2：今日請假人員顯示區塊 (放置於橫幅上方或下方皆可) */}
+                        {isManagementRole(currentUser.role) && todaysLeaves.length > 0 && (
+                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 shadow-sm animate-fade-in">
+                                <h3 className="font-bold text-blue-800 mb-2 flex items-center"><Users className="w-4 h-4 mr-2"/>今日請假人員 ({todaysLeaves.length} 人)</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {todaysLeaves.map(req => (
+                                        <span key={req.requestId} className="bg-white text-blue-700 text-xs font-bold px-2.5 py-1 rounded shadow-sm border border-blue-100">
+                                            {req.applicantName} ({req.leaveType})
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         <div className={`${bannerColor} rounded-2xl p-6 mb-8 text-white relative shadow-md overflow-visible transition-colors duration-500`}>
                             <div className="absolute top-4 right-4">
                                 <button onClick={() => setIsColorPickerOpen(!isColorPickerOpen)} className="p-2 bg-white/20 hover:bg-white/30 rounded-full backdrop-blur-sm transition-all"><Palette className="w-5 h-5"/></button>
                                 {isColorPickerOpen && (
-                                    <div className="absolute right-0 mt-2 bg-white p-3 rounded-xl shadow-xl z-50 w-48 animate-fade-in grid grid-cols-4 gap-2 border border-gray-100">
+                                    <div className="absolute right-0 mt-2 bg-white p-3 rounded-xl shadow-xl z-50 w-64 animate-fade-in grid grid-cols-4 gap-2 border border-gray-100">
                                         {BANNER_COLORS.map(color => (
                                             <button key={color} onClick={() => handleBannerColorChange(color)} className={`w-8 h-8 rounded-full ${color} ${bannerColor === color ? 'ring-2 ring-offset-2 ring-gray-400 scale-110' : ''} transition-all`}></button>
                                         ))}
@@ -918,23 +965,7 @@
                                 )}
                                 {activeTab === 'admin' && (
                                     <div className="space-y-6">
-                                        {/* 🟢 權限分離：僅管理者可新增員工 */}
-                                        {currentUser.role === '管理者' && (
-                                            <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
-                                                <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
-                                                <form onSubmit={handleSaveEmployee} className="space-y-3" autoComplete="off">
-                                                    <input type="text" name="fakeusernameremembered" style={{display:'none'}} aria-hidden="true" />
-                                                    <input type="password" name="fakepasswordremembered" style={{display:'none'}} aria-hidden="true" />
-                                                    
-                                                    <input type="text" required autoComplete="new-password" placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
-                                                    <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
-                                                    <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
-                                                    <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
-                                                    <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
-                                                </form>
-                                            </div>
-                                        )}
-
+                                        
                                         <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-5">
                                             <h3 className="font-bold text-blue-800 mb-4 flex items-center"><Download className="w-4 h-4 mr-2"/>資料匯出 (Excel)</h3>
                                             <div className="space-y-3">
@@ -952,6 +983,22 @@
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {currentUser.role === '管理者' && (
+                                            <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-5">
+                                                <h3 className="font-bold text-orange-800 mb-4 flex items-center"><UserPlus className="w-4 h-4 mr-2"/>新增員工</h3>
+                                                <form onSubmit={handleSaveEmployee} className="space-y-3" autoComplete="off">
+                                                    <input type="text" name="fakeusernameremembered" style={{display:'none'}} aria-hidden="true" />
+                                                    <input type="password" name="fakepasswordremembered" style={{display:'none'}} aria-hidden="true" />
+                                                    
+                                                    <input type="text" required autoComplete="new-password" placeholder="員工 ID" className="w-full border rounded p-2 text-sm" value={empForm.id} onChange={e=>setEmpForm({...empForm,id:e.target.value})}/>
+                                                    <input type="text" required autoComplete="new-password" placeholder="姓名" className="w-full border rounded p-2 text-sm" value={empForm.name} onChange={e=>setEmpForm({...empForm,name:e.target.value})}/>
+                                                    <input type="text" required autoComplete="new-password" placeholder="LINE User ID (必填)" className="w-full border border-[#06C755] bg-green-50 rounded p-2 text-sm" value={empForm.lineId} onChange={e=>setEmpForm({...empForm,lineId:e.target.value})}/>
+                                                    <div className="flex gap-2"><select className="flex-1 border rounded p-2 text-sm bg-white" value={empForm.role} onChange={e=>setEmpForm({...empForm,role:e.target.value})}><option>申請者</option><option>簽核者</option><option>管理者</option></select><input type="number" step="0.5" className="flex-1 border rounded p-2 text-sm" placeholder="特休" value={empForm.annualLeaveQuota} onChange={e=>setEmpForm({...empForm,annualLeaveQuota:e.target.value})}/></div>
+                                                    <button type="submit" className="w-full bg-orange-600 text-white font-bold py-2 rounded-lg text-sm shadow-md hover:bg-orange-700">新增</button>
+                                                </form>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -991,7 +1038,7 @@
                                                 <div className="flex justify-between items-start mb-2">
                                                     <div className="flex items-center gap-2">
                                                         <div className="font-bold text-sm">{req.applicantName}</div>
-                                                        <div className="text-xs text-gray-400">{req.applyTime.split(' ')[0]}</div>
+                                                        <div className="text-xs text-gray-400">{getLocalDateString(req.applyTime)}</div>
                                                     </div>
                                                     <div className={`text-xs font-bold px-2 py-0.5 rounded ${getStatusColor(req.status)} flex items-center`}>{getStatusIcon(req.status)}{req.status}</div>
                                                 </div>
