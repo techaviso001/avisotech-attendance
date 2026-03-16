@@ -41,9 +41,10 @@
     </div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.2.0';
-        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette } from 'https://esm.sh/lucide-react@0.263.1';
+        // 🟢 修正：統一 React 版本，並加上 deps 參數強制套件使用相同的 React 實體，解決 createElement 錯誤
+        import React, { useState, useEffect, useMemo } from 'https://esm.sh/react@18.3.1';
+        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+        import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle, User, LogOut, FileText, Briefcase, AlertCircle, ChevronRight, ChevronLeft, Send, ShieldCheck, UserPlus, Users, Settings, Download, Filter, Palmtree, Ban, AlertTriangle, Info, Edit, Save, X, PlayCircle, StopCircle, Timer, ClipboardEdit, List, MoreHorizontal, Hexagon, Lock, Unlock, Bell, ExternalLink, RefreshCw, BarChart3, Check, CloudLightning, Palette } from 'https://esm.sh/lucide-react@0.263.1?deps=react@18.3.1';
 
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
@@ -551,25 +552,45 @@
                 let filename = '';
 
                 if (type === 'leave') {
-                    const allReq = [...leaveRequests, ...makeupRequests];
-                    const filtered = allReq.filter(r => {
-                        const recordDate = r.type === 'leave' ? r.startDate : r.targetDate;
+                    const filtered = leaveRequests.filter(r => {
+                        const recordDate = r.startDate;
                         return recordDate >= exportDates.start && recordDate <= exportDates.end;
                     });
                     
-                    dataToExport = filtered.map(r => ({
-                        '單號': r.requestId,
-                        '申請人': r.applicantName,
-                        '類型': r.type === 'leave' ? `請假 (${r.leaveType})` : `補打卡 (${r.makeupType})`,
-                        '開始時間': r.type === 'leave' ? `${r.startDate} ${r.startSession}` : `${r.targetDate} ${r.targetTime}`,
-                        '結束時間': r.type === 'leave' ? `${r.endDate} ${r.endSession}` : '',
-                        '事由': r.reason,
-                        '狀態': r.status,
-                        '申請時間': r.applyTime,
-                        '代理人': r.deputyName || '無',
-                        '簽核者': r.approverName || ''
-                    }));
-                    filename = `出勤單據紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
+                    dataToExport = filtered.map(r => {
+                        const emp = employees.find(e => e.id === r.applicantId);
+                        const quota = emp ? parseFloat(emp.annualLeaveQuota) || 0 : 0;
+                        
+                        const usedAnnual = leaveRequests.filter(req => req.applicantId === r.applicantId && req.leaveType === '特休' && req.status !== '不通過' && req.status !== '已取消')
+                            .reduce((sum, req) => sum + calculateDuration(req.startDate, req.startSession, req.endDate, req.endSession), 0);
+                            
+                        const totalLeave = leaveRequests.filter(req => req.applicantId === r.applicantId && req.status !== '不通過' && req.status !== '已取消')
+                            .reduce((sum, req) => sum + calculateDuration(req.startDate, req.startSession, req.endDate, req.endSession), 0);
+                            
+                        const rangeLeave = filtered.filter(req => req.applicantId === r.applicantId && req.status !== '不通過' && req.status !== '已取消')
+                            .reduce((sum, req) => sum + calculateDuration(req.startDate, req.startSession, req.endDate, req.endSession), 0);
+
+                        const currentDuration = calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession);
+
+                        return {
+                            '單號': r.requestId,
+                            '申請人': r.applicantName,
+                            '類型': `請假 (${r.leaveType})`,
+                            '開始時間': `${r.startDate} ${r.startSession}`,
+                            '結束時間': `${r.endDate} ${r.endSession}`,
+                            '本次天數': currentDuration,
+                            '事由': r.reason,
+                            '狀態': r.status,
+                            '申請時間': r.applyTime,
+                            '代理人': r.deputyName || '無',
+                            '簽核者': r.approverName || '',
+                            '特休餘額': quota - usedAnnual,
+                            '已用特休': usedAnnual,
+                            '總請假天數': totalLeave,
+                            '日期範圍內總請假天數': rangeLeave
+                        };
+                    });
+                    filename = `請假單據紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
                 } else if (type === 'attendance') {
                     const filtered = attendanceRecords.filter(r => {
                         return r.date >= exportDates.start && r.date <= exportDates.end;
@@ -645,7 +666,6 @@
                 const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
                 const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: nowStr, ...deputyInfo };
                 
-                // 🟢 樂觀更新，但加入防呆機制
                 setLeaveRequests([newRequest, ...leaveRequests]); 
                 setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
                 
@@ -653,13 +673,13 @@
                     const res = await callApi("addRequest", newRequest);
                     if (res && res.error) {
                         showAlert('後端錯誤', `資料未寫入資料庫！\n錯誤：${res.error}\n👉 請確認 GAS 是否已重新發佈為「新版本」。`, 'error');
-                        setLeaveRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                        setLeaveRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); 
                     } else {
                         showAlert('成功', '假單已送出，並通知代理人', 'success'); 
                     }
                 } catch(err) {
                     showAlert('連線錯誤', '無法連線至資料庫，請稍後再試。', 'error');
-                    setLeaveRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                    setLeaveRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); 
                 }
             };
 
@@ -668,7 +688,6 @@
                 const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
                 const newRequest = { type: 'makeup', requestId: `MK-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, targetDate: makeupForm.targetDate, targetTime: makeupForm.targetTime, makeupType: makeupForm.makeupType, reason: makeupForm.reason, status: '待簽核', applyTime: nowStr };
                 
-                // 🟢 樂觀更新，加入防呆機制
                 setMakeupRequests([newRequest, ...makeupRequests]); 
                 setIsMakeupModalOpen(false); 
                 setMakeupForm({ ...makeupForm, reason: '' });
@@ -677,13 +696,13 @@
                     const res = await callApi("addRequest", newRequest);
                     if (res && res.error) {
                         showAlert('後端錯誤', `資料未寫入資料庫！\n錯誤：${res.error}\n👉 請確認工作表「MakeupRequests」是否存在，且 GAS 已重新發佈為「新版本」。`, 'error');
-                        setMakeupRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                        setMakeupRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); 
                     } else {
                         showAlert('成功', '補打卡申請已送出', 'success'); 
                     }
                 } catch(err) {
                     showAlert('連線錯誤', '無法連線至資料庫，請稍後再試。', 'error');
-                    setMakeupRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                    setMakeupRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); 
                 }
             };
 
