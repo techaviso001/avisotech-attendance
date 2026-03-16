@@ -48,8 +48,8 @@
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
         // 🟢 強制更新快取 ID
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_13';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_13';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_14';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_14';
         
         // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
@@ -76,40 +76,42 @@
             }
         };
 
+        // 🟢 最強健的日期轉換器，保證絕不拋出 TypeError
         const getLocalDateString = (val) => {
             if (!val) return '';
-            if (typeof val === 'string' && val.includes('T')) {
-                const utcDate = new Date(val);
+            const safeStr = String(val);
+            if (safeStr.includes('T')) {
+                const utcDate = new Date(safeStr);
                 if (!isNaN(utcDate.getTime())) {
                     utcDate.setUTCHours(utcDate.getUTCHours() + 8);
                     return `${utcDate.getUTCFullYear()}-${String(utcDate.getUTCMonth() + 1).padStart(2, '0')}-${String(utcDate.getUTCDate()).padStart(2, '0')}`;
                 }
             }
-            if (typeof val === 'string') {
-                const parts = val.split(' ')[0].split('/');
-                if (parts.length === 3) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-                return val.substring(0, 10);
-            }
-            return String(val);
+            const parts = safeStr.split(' ')[0].split('/');
+            if (parts.length === 3) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+            return safeStr.substring(0, 10);
         };
 
+        // 🟢 最強健的時間轉換器
         const formatTimeDisplay = (val) => {
             if (!val) return '';
-            if (typeof val === 'string' && val.includes('1899-12-30T')) {
-                const utcDate = new Date(val);
+            const safeStr = String(val);
+            if (safeStr.includes('1899-12-30T')) {
+                const utcDate = new Date(safeStr);
                 if (!isNaN(utcDate.getTime())) {
                     utcDate.setUTCHours(utcDate.getUTCHours() + 8);
                     return `${String(utcDate.getUTCHours()).padStart(2, '0')}:${String(utcDate.getUTCMinutes()).padStart(2, '0')}`;
                 }
             }
-            if (typeof val === 'string' && val.length >= 5) return val.substring(0, 5);
-            return String(val);
+            if (safeStr.length >= 5) return safeStr.substring(0, 5);
+            return safeStr;
         };
 
         const getTodayString = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; };
-        const getNowTimeString = () => new Date().toTimeString().substring(0, 5);
+        const getNowTimeString = () => { const now = new Date(); return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`; };
         
         const calculateDuration = (start, startSess, end, endSess) => {
+            if (!start || !end) return 0;
             const d1 = new Date(start).getTime(), d2 = new Date(end).getTime();
             if (isNaN(d1) || isNaN(d2)) return 0;
             let total = Math.ceil(Math.abs(d2 - d1) / (86400000));
@@ -221,8 +223,8 @@
                                         <div key={idx} className="mb-2 text-sm bg-emerald-50 p-3 rounded-lg border border-emerald-100 shadow-sm">
                                             <div className="font-bold text-emerald-800 mb-1">{employees.find(e=>e.id===att.employeeId)?.name}</div>
                                             <div className="text-emerald-700 flex justify-between font-mono">
-                                                <span>上班: {att.checkInTime || '--:--'}</span>
-                                                <span>下班: {att.checkOutTime || '--:--'}</span>
+                                                <span>上班: {formatTimeDisplay(att.checkInTime) || '--:--'}</span>
+                                                <span>下班: {formatTimeDisplay(att.checkOutTime) || '--:--'}</span>
                                             </div>
                                         </div>
                                     ))}
@@ -238,7 +240,7 @@
                                                 {req.applicantName} - {req.type === 'leave' ? req.leaveType : `補打卡 (${req.makeupType})`}
                                             </div>
                                             <div className={`text-xs space-y-1 ${req.type === 'leave' ? 'text-blue-700' : 'text-orange-700'}`}>
-                                                <div className="font-mono">時間: {req.type === 'leave' ? `${req.startDate} ${req.startSession} ~ ${req.endDate} ${req.endSession}` : `${req.targetTime}`}</div>
+                                                <div className="font-mono">時間: {req.type === 'leave' ? `${req.startDate} ${req.startSession} ~ ${req.endDate} ${req.endSession}` : `${req.targetDate} ${req.targetTime}`}</div>
                                                 <div>事由: {req.reason}</div>
                                                 <div>狀態: <span className="font-bold">{req.status}</span></div>
                                             </div>
@@ -269,7 +271,7 @@
                                     <div className="flex gap-4">
                                         <div className="flex-1">
                                             <label className="block text-sm font-bold text-gray-700 mb-1">假別</label>
-                                            <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.leaveType} onChange={e=>setReqData({...reqData, leaveType: e.target.value})}>
+                                            <select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.leaveType || '特休'} onChange={e=>setReqData({...reqData, leaveType: e.target.value})}>
                                                 <option>特休</option><option>事假</option><option>病假</option><option>公假</option>
                                             </select>
                                         </div>
@@ -284,28 +286,28 @@
                                     <div className="flex gap-2 items-end">
                                         <div className="flex-1">
                                             <label className="block text-xs font-bold text-gray-500 mb-1">開始日期</label>
-                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.startDate} onChange={e=>setReqData({...reqData, startDate: e.target.value})}/>
+                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.startDate || ''} onChange={e=>setReqData({...reqData, startDate: e.target.value})}/>
                                         </div>
-                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.startSession} onChange={e=>setReqData({...reqData, startSession: e.target.value})}><option>上午</option><option>下午</option></select>
+                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.startSession || '上午'} onChange={e=>setReqData({...reqData, startSession: e.target.value})}><option>上午</option><option>下午</option></select>
                                     </div>
                                     <div className="flex gap-2 items-end">
                                         <div className="flex-1">
                                             <label className="block text-xs font-bold text-gray-500 mb-1">結束日期</label>
-                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.endDate} onChange={e=>setReqData({...reqData, endDate: e.target.value})}/>
+                                            <input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.endDate || ''} onChange={e=>setReqData({...reqData, endDate: e.target.value})}/>
                                         </div>
-                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.endSession} onChange={e=>setReqData({...reqData, endSession: e.target.value})}><option>上午</option><option>下午</option></select>
+                                        <select className="w-24 rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.endSession || '下午'} onChange={e=>setReqData({...reqData, endSession: e.target.value})}><option>上午</option><option>下午</option></select>
                                     </div>
                                 </>
                             ) : (
                                 <>
-                                    <div><label className="block text-sm font-bold text-gray-700 mb-1">補打卡日期</label><input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetDate} onChange={e=>setReqData({...reqData, targetDate: e.target.value})}/></div>
+                                    <div><label className="block text-sm font-bold text-gray-700 mb-1">補打卡日期</label><input type="date" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetDate || ''} onChange={e=>setReqData({...reqData, targetDate: e.target.value})}/></div>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">類型</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.makeupType} onChange={e=>setReqData({...reqData, makeupType: e.target.value})}><option value="上班">上班</option><option value="下班">下班</option></select></div>
-                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">時間</label><input type="time" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetTime} onChange={e=>setReqData({...reqData, targetTime: e.target.value})}/></div>
+                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">類型</label><select className="w-full rounded-lg border border-gray-300 p-2.5 outline-none bg-white" value={reqData.makeupType || '上班'} onChange={e=>setReqData({...reqData, makeupType: e.target.value})}><option value="上班">上班</option><option value="下班">下班</option></select></div>
+                                        <div><label className="block text-sm font-bold text-gray-700 mb-1">時間</label><input type="time" required className="w-full rounded-lg border border-gray-300 p-2.5 outline-none" value={reqData.targetTime || ''} onChange={e=>setReqData({...reqData, targetTime: e.target.value})}/></div>
                                     </div>
                                 </>
                             )}
-                            <div><label className="block text-sm font-bold text-gray-700 mb-1">事由</label><textarea required rows={2} className="w-full rounded-lg border border-gray-300 p-2.5 outline-none resize-none" value={reqData.reason} onChange={e=>setReqData({...reqData, reason: e.target.value})}/></div>
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">事由</label><textarea required rows={2} className="w-full rounded-lg border border-gray-300 p-2.5 outline-none resize-none" value={reqData.reason || ''} onChange={e=>setReqData({...reqData, reason: e.target.value})}/></div>
                             <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-200 mt-2">確認修改並儲存</button>
                         </form>
                     </div>
@@ -367,7 +369,7 @@
             const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', message: '' });
             const [activeTab, setActiveTab] = useState('apply');
             
-            const [leaveForm, setLeaveForm] = useState({ leaveType: '特休', startDate: '', endDate: '', startSession: '上午', endSession: '上午', reason: '', deputyId: '' });
+            const [leaveForm, setLeaveForm] = useState({ leaveType: '特休', startDate: '', endDate: '', startSession: '上午', endSession: '下午', reason: '', deputyId: '' });
             const [makeupForm, setMakeupForm] = useState({ targetDate: getTodayString(), targetTime: '09:00', makeupType: '上班', reason: '' });
             const [empForm, setEmpForm] = useState({ id: '', name: '', role: '申請者', lineId: '', annualLeaveQuota: '0', avatarColor: 'bg-indigo-500', isEdit: false });
 
@@ -375,7 +377,6 @@
             const [currentMonth, setCurrentMonth] = useState(new Date());
             
             const [showAllInCalendar, setShowAllInCalendar] = useState(false); 
-            
             const [editingRequest, setEditingRequest] = useState(null);
             const [selectedDateDetails, setSelectedDateDetails] = useState(null); 
 
@@ -429,7 +430,6 @@
                 }
             }, [lineProfile, employees, isDataLoading]);
 
-            // 🟢 資料取得時直接透過強健的函數解析，徹底擺脫表頭語言問題
             const fetchLatestData = async () => {
                 setIsDataLoading(true);
                 try {
@@ -441,14 +441,14 @@
                             ...r, type: 'leave',
                             startDate: getLocalDateString(r.startDate),
                             endDate: getLocalDateString(r.endDate),
-                            applyTime: getLocalDateString(r.applyTime)
+                            applyTime: String(r.applyTime || '')
                         }));
                         
                         const parsedMakeups = (data.makeupRequests || []).map(r => ({ 
                             ...r, type: 'makeup',
                             targetDate: getLocalDateString(r.targetDate),
                             targetTime: formatTimeDisplay(r.targetTime),
-                            applyTime: getLocalDateString(r.applyTime)
+                            applyTime: String(r.applyTime || '')
                         }));
 
                         setLeaveRequests(parsedLeaves);
@@ -491,15 +491,19 @@
                     .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
             }, [currentUser, leaveRequests]);
 
+            // 🟢 強健的陣列排序防護網：強制使用自訂的 parseTime 防白畫面
             const visibleRequests = useMemo(() => {
                 if (!currentUser || currentUser.error) return [];
                 let allRequests = [...leaveRequests, ...makeupRequests];
                 
-                allRequests.sort((a, b) => {
-                    const timeA = a.applyTime ? new Date(a.applyTime.replace(/-/g, '/')).getTime() : 0;
-                    const timeB = b.applyTime ? new Date(b.applyTime.replace(/-/g, '/')).getTime() : 0;
-                    return timeB - timeA;
-                });
+                const parseTime = (t) => {
+                    if (!t) return 0;
+                    const s = String(t);
+                    if (s.includes('T')) return new Date(s).getTime() || 0;
+                    return new Date(s.replace(/-/g, '/')).getTime() || 0;
+                };
+
+                allRequests.sort((a, b) => parseTime(b.applyTime) - parseTime(a.applyTime));
                 
                 const isAdminOrApprover = currentUser.role === '管理者' || currentUser.role === '簽核者';
                 if (!isAdminOrApprover) {
@@ -639,16 +643,23 @@
                     const deputy = employees.find(e => e.id === leaveForm.deputyId);
                     if (deputy) deputyInfo = { deputyId: deputy.id, deputyName: deputy.name, deputyStatus: 'pending' };
                 }
-                const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }), ...deputyInfo };
-                setLeaveRequests([newRequest, ...leaveRequests]); setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
-                showAlert('成功', '假單已送出，並通知代理人', 'success'); await callApi("addRequest", newRequest);
+                const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
+                const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: nowStr, ...deputyInfo };
+                setLeaveRequests([newRequest, ...leaveRequests]); 
+                setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
+                showAlert('成功', '假單已送出，並通知代理人', 'success'); 
+                await callApi("addRequest", newRequest);
             };
 
             const handleSubmitMakeup = async (e) => {
                 e.preventDefault();
-                const newRequest = { type: 'makeup', requestId: `MK-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, targetDate: makeupForm.targetDate, targetTime: makeupForm.targetTime, makeupType: makeupForm.makeupType, reason: makeupForm.reason, status: '待簽核', applyTime: new Date().toLocaleString('zh-TW', { hour12: false }) };
-                setMakeupRequests([newRequest, ...makeupRequests]); setIsMakeupModalOpen(false); setMakeupForm({ ...makeupForm, reason: '' });
-                showAlert('成功', '補打卡申請已送出', 'success'); await callApi("addRequest", newRequest);
+                const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
+                const newRequest = { type: 'makeup', requestId: `MK-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, targetDate: makeupForm.targetDate, targetTime: makeupForm.targetTime, makeupType: makeupForm.makeupType, reason: makeupForm.reason, status: '待簽核', applyTime: nowStr };
+                setMakeupRequests([newRequest, ...makeupRequests]); 
+                setIsMakeupModalOpen(false); 
+                setMakeupForm({ ...makeupForm, reason: '' });
+                showAlert('成功', '補打卡申請已送出', 'success'); 
+                await callApi("addRequest", newRequest);
             };
 
             const handleDeputyAction = async (requestId, isAgreed) => {
