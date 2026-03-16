@@ -48,8 +48,8 @@
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
         // 🟢 強制更新快取 ID
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_14';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_14';
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_15';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_15';
         
         // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
@@ -240,7 +240,7 @@
                                                 {req.applicantName} - {req.type === 'leave' ? req.leaveType : `補打卡 (${req.makeupType})`}
                                             </div>
                                             <div className={`text-xs space-y-1 ${req.type === 'leave' ? 'text-blue-700' : 'text-orange-700'}`}>
-                                                <div className="font-mono">時間: {req.type === 'leave' ? `${req.startDate} ${req.startSession} ~ ${req.endDate} ${req.endSession}` : `${req.targetDate} ${req.targetTime}`}</div>
+                                                <div className="font-mono">時間: {req.type === 'leave' ? `${req.startDate} ${req.startSession} ~ ${req.endDate} ${req.endSession}` : `${req.targetTime}`}</div>
                                                 <div>事由: {req.reason}</div>
                                                 <div>狀態: <span className="font-bold">{req.status}</span></div>
                                             </div>
@@ -491,7 +491,6 @@
                     .reduce((sum, r) => sum + calculateDuration(r.startDate, r.startSession, r.endDate, r.endSession), 0);
             }, [currentUser, leaveRequests]);
 
-            // 🟢 強健的陣列排序防護網：強制使用自訂的 parseTime 防白畫面
             const visibleRequests = useMemo(() => {
                 if (!currentUser || currentUser.error) return [];
                 let allRequests = [...leaveRequests, ...makeupRequests];
@@ -645,21 +644,47 @@
                 }
                 const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
                 const newRequest = { type: 'leave', requestId: `REQ-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate, startSession: leaveForm.startSession, endSession: leaveForm.endSession, reason: leaveForm.reason, status: '待簽核', applyTime: nowStr, ...deputyInfo };
+                
+                // 🟢 樂觀更新，但加入防呆機制
                 setLeaveRequests([newRequest, ...leaveRequests]); 
                 setLeaveForm({ ...leaveForm, reason: '', deputyId: '' });
-                showAlert('成功', '假單已送出，並通知代理人', 'success'); 
-                await callApi("addRequest", newRequest);
+                
+                try {
+                    const res = await callApi("addRequest", newRequest);
+                    if (res && res.error) {
+                        showAlert('後端錯誤', `資料未寫入資料庫！\n錯誤：${res.error}\n👉 請確認 GAS 是否已重新發佈為「新版本」。`, 'error');
+                        setLeaveRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                    } else {
+                        showAlert('成功', '假單已送出，並通知代理人', 'success'); 
+                    }
+                } catch(err) {
+                    showAlert('連線錯誤', '無法連線至資料庫，請稍後再試。', 'error');
+                    setLeaveRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                }
             };
 
             const handleSubmitMakeup = async (e) => {
                 e.preventDefault();
                 const nowStr = new Date().toLocaleString('zh-TW', { hour12: false });
                 const newRequest = { type: 'makeup', requestId: `MK-${Date.now()}`, applicantId: currentUser.id, applicantName: currentUser.name, targetDate: makeupForm.targetDate, targetTime: makeupForm.targetTime, makeupType: makeupForm.makeupType, reason: makeupForm.reason, status: '待簽核', applyTime: nowStr };
+                
+                // 🟢 樂觀更新，加入防呆機制
                 setMakeupRequests([newRequest, ...makeupRequests]); 
                 setIsMakeupModalOpen(false); 
                 setMakeupForm({ ...makeupForm, reason: '' });
-                showAlert('成功', '補打卡申請已送出', 'success'); 
-                await callApi("addRequest", newRequest);
+                
+                try {
+                    const res = await callApi("addRequest", newRequest);
+                    if (res && res.error) {
+                        showAlert('後端錯誤', `資料未寫入資料庫！\n錯誤：${res.error}\n👉 請確認工作表「MakeupRequests」是否存在，且 GAS 已重新發佈為「新版本」。`, 'error');
+                        setMakeupRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                    } else {
+                        showAlert('成功', '補打卡申請已送出', 'success'); 
+                    }
+                } catch(err) {
+                    showAlert('連線錯誤', '無法連線至資料庫，請稍後再試。', 'error');
+                    setMakeupRequests(prev => prev.filter(r => r.requestId !== newRequest.requestId)); // Rollback
+                }
             };
 
             const handleDeputyAction = async (requestId, isAgreed) => {
@@ -697,8 +722,17 @@
                 }
 
                 setEditingRequest(null);
-                showAlert('成功', '單據已更新並儲存', 'success');
-                await callApi("editRequest", updatedReq);
+                
+                try {
+                    const res = await callApi("editRequest", updatedReq);
+                    if (res && res.error) {
+                        showAlert('後端錯誤', `更新失敗：${res.error}`, 'error');
+                    } else {
+                        showAlert('成功', '單據已更新並儲存', 'success');
+                    }
+                } catch(err) {
+                    showAlert('連線錯誤', '無法連線至資料庫', 'error');
+                }
             };
 
             const handleApproval = async (req, isApproved) => {
