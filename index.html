@@ -47,15 +47,14 @@
 
         // 🟢 GAS 網址
         const API_URL = "https://script.google.com/macros/s/AKfycbynmmg8qHTcp7fVcFg1SaeudRh47eZblhWx8sH2iWtEW46JbIQKuj5KK9sCDEo36QQ9sA/exec";
-        const CACHE_KEY_EMP = 'avisotech_employees_v2_11';
-        const CACHE_KEY_ATT = 'avisotech_attendance_v2_11';
+        // 🟢 強制更新快取 ID
+        const CACHE_KEY_EMP = 'avisotech_employees_v2_13';
+        const CACHE_KEY_ATT = 'avisotech_attendance_v2_13';
         
         // 🔴 LIFF ID
         const MY_LIFF_ID = "2009402327-K8JeCCPo"; 
         
         const AVATAR_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500', 'bg-emerald-500', 'bg-teal-500', 'bg-cyan-500', 'bg-sky-500', 'bg-blue-500', 'bg-indigo-500', 'bg-violet-500', 'bg-purple-500', 'bg-fuchsia-500', 'bg-pink-500', 'bg-rose-500', 'bg-slate-500'];
-        
-        // 🟢 修正 4：擴充自選顏色庫
         const BANNER_COLORS = [
             'bg-[#06C755]', 'bg-emerald-600', 'bg-teal-600', 'bg-cyan-600',
             'bg-sky-600', 'bg-blue-600', 'bg-indigo-600', 'bg-violet-600',
@@ -77,11 +76,21 @@
             }
         };
 
-        const getLocalDateString = (dateVal) => {
-            if (!dateVal) return '';
-            const d = new Date(dateVal);
-            if (isNaN(d.getTime())) return String(dateVal);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const getLocalDateString = (val) => {
+            if (!val) return '';
+            if (typeof val === 'string' && val.includes('T')) {
+                const utcDate = new Date(val);
+                if (!isNaN(utcDate.getTime())) {
+                    utcDate.setUTCHours(utcDate.getUTCHours() + 8);
+                    return `${utcDate.getUTCFullYear()}-${String(utcDate.getUTCMonth() + 1).padStart(2, '0')}-${String(utcDate.getUTCDate()).padStart(2, '0')}`;
+                }
+            }
+            if (typeof val === 'string') {
+                const parts = val.split(' ')[0].split('/');
+                if (parts.length === 3) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+                return val.substring(0, 10);
+            }
+            return String(val);
         };
 
         const formatTimeDisplay = (val) => {
@@ -212,8 +221,8 @@
                                         <div key={idx} className="mb-2 text-sm bg-emerald-50 p-3 rounded-lg border border-emerald-100 shadow-sm">
                                             <div className="font-bold text-emerald-800 mb-1">{employees.find(e=>e.id===att.employeeId)?.name}</div>
                                             <div className="text-emerald-700 flex justify-between font-mono">
-                                                <span>上班: {formatTimeDisplay(att.checkInTime) || '--:--'}</span>
-                                                <span>下班: {formatTimeDisplay(att.checkOutTime) || '--:--'}</span>
+                                                <span>上班: {att.checkInTime || '--:--'}</span>
+                                                <span>下班: {att.checkOutTime || '--:--'}</span>
                                             </div>
                                         </div>
                                     ))}
@@ -250,7 +259,7 @@
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-                        <div className="bg-blue-600 px-6 py-4 border-b border-blue-50 flex items-center justify-between">
+                        <div className="bg-blue-600 px-6 py-4 border-b border-blue-500 flex items-center justify-between">
                             <div className="flex items-center text-white"><Edit className="w-5 h-5 mr-2"/><h3 className="font-bold">編輯{isLeave ? '請假單' : '補打卡單'}</h3></div>
                             <button onClick={onClose} className="text-blue-200 hover:text-white transition-colors"><X className="w-5 h-5"/></button>
                         </div>
@@ -365,7 +374,6 @@
             const [viewMode, setViewMode] = useState('list'); 
             const [currentMonth, setCurrentMonth] = useState(new Date());
             
-            // 🟢 修正 1：日曆預設只顯示自己，新增切換按鈕
             const [showAllInCalendar, setShowAllInCalendar] = useState(false); 
             
             const [editingRequest, setEditingRequest] = useState(null);
@@ -421,7 +429,7 @@
                 }
             }, [lineProfile, employees, isDataLoading]);
 
-            // 資料取得時順便用防護網處理歷史髒資料
+            // 🟢 資料取得時直接透過強健的函數解析，徹底擺脫表頭語言問題
             const fetchLatestData = async () => {
                 setIsDataLoading(true);
                 try {
@@ -429,17 +437,18 @@
                     if (data && !data.error) {
                         setEmployees(data.employees || []);
                         
-                        // 🟢 獨立解析 LeaveRequests 與 MakeupRequests
                         const parsedLeaves = (data.leaveRequests || []).map(r => ({ 
                             ...r, type: 'leave',
                             startDate: getLocalDateString(r.startDate),
-                            endDate: getLocalDateString(r.endDate)
+                            endDate: getLocalDateString(r.endDate),
+                            applyTime: getLocalDateString(r.applyTime)
                         }));
                         
                         const parsedMakeups = (data.makeupRequests || []).map(r => ({ 
                             ...r, type: 'makeup',
                             targetDate: getLocalDateString(r.targetDate),
-                            targetTime: formatTimeDisplay(r.targetTime)
+                            targetTime: formatTimeDisplay(r.targetTime),
+                            applyTime: getLocalDateString(r.applyTime)
                         }));
 
                         setLeaveRequests(parsedLeaves);
@@ -447,6 +456,7 @@
                         
                         const parsedAttendance = (data.attendance || []).map(a => ({
                             ...a,
+                            date: getLocalDateString(a.date),
                             checkInTime: formatTimeDisplay(a.checkInTime),
                             checkOutTime: formatTimeDisplay(a.checkOutTime)
                         }));
@@ -484,7 +494,13 @@
             const visibleRequests = useMemo(() => {
                 if (!currentUser || currentUser.error) return [];
                 let allRequests = [...leaveRequests, ...makeupRequests];
-                allRequests.sort((a, b) => new Date(b.applyTime).getTime() - new Date(a.applyTime).getTime());
+                
+                allRequests.sort((a, b) => {
+                    const timeA = a.applyTime ? new Date(a.applyTime.replace(/-/g, '/')).getTime() : 0;
+                    const timeB = b.applyTime ? new Date(b.applyTime.replace(/-/g, '/')).getTime() : 0;
+                    return timeB - timeA;
+                });
+                
                 const isAdminOrApprover = currentUser.role === '管理者' || currentUser.role === '簽核者';
                 if (!isAdminOrApprover) {
                     allRequests = allRequests.filter(r => r.applicantId === currentUser.id || r.deputyId === currentUser.id);
@@ -497,7 +513,6 @@
                 return leaveRequests.filter(r => r.deputyId === currentUser.id && r.deputyStatus === 'pending' && r.status === '待簽核');
             }, [currentUser, leaveRequests]);
 
-            // 🟢 新增：過濾並顯示今日有請假的人員 (給管理者與簽核者看)
             const todaysLeaves = useMemo(() => {
                 const todayStr = getTodayString();
                 return leaveRequests.filter(r => r.status === '通過' && r.startDate <= todayStr && r.endDate >= todayStr);
@@ -521,7 +536,6 @@
                 }
             };
 
-            // 🟢 修正 3：匯出請假改用 startDate 與 targetDate 當作過濾依據
             const handleExportExcel = (type) => {
                 if (!exportDates.start || !exportDates.end) {
                     showAlert('錯誤', '請選擇完整的起始與結束日期', 'error'); return;
@@ -555,12 +569,11 @@
                     filename = `出勤單據紀錄_${exportDates.start}_至_${exportDates.end}.xlsx`;
                 } else if (type === 'attendance') {
                     const filtered = attendanceRecords.filter(r => {
-                        const dateStr = typeof r.date === 'string' ? r.date.substring(0, 10).replace(/\//g, '-') : '';
-                        return dateStr >= exportDates.start && dateStr <= exportDates.end;
+                        return r.date >= exportDates.start && r.date <= exportDates.end;
                     });
                     dataToExport = filtered.map(r => ({
                         '員工姓名': employees.find(e => e.id === r.employeeId)?.name || r.employeeId,
-                        '打卡日期': typeof r.date === 'string' ? r.date.substring(0, 10).replace(/\//g, '-') : r.date,
+                        '打卡日期': r.date,
                         '上班時間': r.checkInTime || '',
                         '下班時間': r.checkOutTime || ''
                     }));
@@ -690,7 +703,6 @@
                 } else {
                     setMakeupRequests(prev => prev.map(r => r.requestId === req.requestId ? { ...r, ...approvalData } : r));
                     
-                    // 🟢 補打卡通過，在前端同步更新 Attendance 視圖
                     if (isApproved) {
                          setAttendanceRecords(prev => {
                             const existingIndex = prev.findIndex(rec => rec.employeeId === req.applicantId && rec.date === req.targetDate);
@@ -743,7 +755,6 @@
                 let calRequests = visibleRequests;
                 let calAttendance = attendanceRecords;
 
-                // 🟢 修正 1：依照 showAllInCalendar 按鈕來決定是否顯示所有人
                 if (!showAllInCalendar) {
                     calRequests = calRequests.filter(r => r.applicantId === currentUser?.id);
                     calAttendance = calAttendance.filter(r => r.employeeId === currentUser?.id);
@@ -793,7 +804,6 @@
                                 <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1.5 hover:bg-white rounded-lg shadow-sm border border-transparent hover:border-gray-200 transition-all"><ChevronRight className="w-4 h-4 text-gray-600"/></button>
                             </div>
                             
-                            {/* 🟢 修正 1：更換為按鈕切換 */}
                             {isManagementRole(currentUser.role) && (
                                 <button 
                                     onClick={() => setShowAllInCalendar(!showAllInCalendar)} 
@@ -880,7 +890,6 @@
 
                     <div className="max-w-6xl mx-auto px-4 py-8">
                         
-                        {/* 🟢 修正 2：今日請假人員顯示區塊 (放置於橫幅上方或下方皆可) */}
                         {isManagementRole(currentUser.role) && todaysLeaves.length > 0 && (
                             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 shadow-sm animate-fade-in">
                                 <h3 className="font-bold text-blue-800 mb-2 flex items-center"><Users className="w-4 h-4 mr-2"/>今日請假人員 ({todaysLeaves.length} 人)</h3>
